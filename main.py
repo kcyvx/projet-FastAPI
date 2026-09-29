@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Header, Depends
-from account.account import Account
+from account.account import Account, AccountCreate
 from user.user import UserCreate
 from transaction.transaction import Transaction, InvalidAmountError, InsufficientBalanceError
 from repositories.interfaces import AccountRepository, UserRepository
@@ -86,4 +86,29 @@ def Faire_un_transfert(
         "summary": summary,
         "sender_new_solde": source.solde,
         "receiver_new_solde": destinataire.solde
+    }
+
+@app.post("/accounts", status_code=201)
+def ouvrir_compte(
+    payload: AccountCreate,
+    account_repo: AccountRepository = Depends(get_account_repo),
+    user_repo: UserRepository = Depends(get_user_repo)
+):
+    # 1. Vérifier que l'utilisateur existe bien dans la base
+    user = user_repo.get_by_id(payload.user_id)
+    if not user:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Impossible d'ouvrir un compte : l'utilisateur {payload.user_id} n'existe pas."
+        )
+
+    # 2. Création du compte (solde initialisé à 0.0 par le repo)
+    nouveau_compte = account_repo.create(
+        name=payload.name,
+        user_id=payload.user_id
+    )
+
+    return {
+        "message": "Compte bancaire ouvert avec succès",
+        "account": nouveau_compte
     }

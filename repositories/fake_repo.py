@@ -20,6 +20,18 @@ class FakeAccountRepository:
     def get_all(self) -> List[Account]:
         return list(self.accounts.values())
 
+    # --- NOUVELLE MÉTHODE US 4 ---
+    def create(self, name: str, user_id: int) -> Account:
+        new_id = max(self.accounts.keys(), default=0) + 1
+        new_account = Account(
+            id=new_id,
+            name=name,
+            solde=0.0,
+            user_id=user_id
+        )
+        self.accounts[new_id] = new_account
+        return new_account
+
     def transfer(self, source_id: int, destinataire_id: int, montant: float) -> tuple[Account, Account, Transaction]:
         source = self.get_by_id(source_id)
         destinataire = self.get_by_id(destinataire_id)

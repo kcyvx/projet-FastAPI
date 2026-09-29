@@ -12,6 +12,10 @@ class AccountRepository(Protocol):
         """Récupère tous les comptes."""
         ...
 
+    def create(self, name: str, user_id: int) -> Account:
+        """Crée un nouveau compte bancaire avec un solde initial de 0.0."""
+        ...
+
     def transfer(self, source_id: int, destinataire_id: int, montant: float) -> tuple[Account, Account, Transaction]:
         """Effectue un virement atomique entre deux comptes et enregistre la transaction."""
         ...

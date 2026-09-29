@@ -16,6 +16,22 @@ class SqlAccountRepository:
     def get_all(self) -> List[Account]:
         return self.session.exec(select(Account)).all()
 
+    # --- NOUVELLE MÉTHODE US 4 ---
+    def create(self, name: str, user_id: int) -> Account:
+        new_account = Account(
+            name=name,
+            user_id=user_id,
+            solde=0.0          # Règle Story 4 : solde à 0€ obligatoire
+        )
+        try:
+            self.session.add(new_account)
+            self.session.commit()
+            self.session.refresh(new_account)
+            return new_account
+        except Exception:
+            self.session.rollback()
+            raise
+
     def transfer(self, source_id: int, destinataire_id: int, montant: float) -> tuple[Account, Account, Transaction]:
         """Effectue un virement atomique avec commit et rollback automatique en cas d'erreur."""
         source = self.session.get(Account, source_id)

@@ -20,6 +20,6 @@ def seed_initial_data():
     create_db_and_tables()
     with Session(engine) as session:
         if not session.exec(select(Account)).first():
-            session.add(Account(id=1, name="Alice", solde=100.0))
-            session.add(Account(id=2, name="Bob", solde=100.0))
+            session.add(Account(id=1, name="Alice", solde=100.0, user_id=1))
+            session.add(Account(id=2, name="Bob", solde=100.0, user_id=2))
             session.commit()
