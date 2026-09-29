@@ -1,4 +1,5 @@
 import os
+import jwt
 from fastapi import Depends
 from sqlmodel import Session
 from db.db import get_session
@@ -26,3 +27,11 @@ def get_user_repo(session: Session = Depends(get_session)) -> UserRepository:
     if is_use_sql():
         return SqlUserRepository(session)
     return _fake_user_repo
+
+def is_logged_in(token: str) -> bool:
+    try:
+        secret_key = os.getenv("SECRET_KEY", "cle_secrete_banque_tres_longue_et_securisee_12345")
+        jwt.decode(token.replace("Bearer ", "").strip(), secret_key, algorithms=["HS256"])
+        return True
+    except Exception:
+        return False

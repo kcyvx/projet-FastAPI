@@ -24,3 +24,11 @@ def hash_password(password: str) -> str:
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     pwd_bytes = plain_password.encode("utf-8")[:72]
     return bcrypt.checkpw(pwd_bytes, hashed_password.encode("utf-8"))
+
+def is_logged_in(token: str) -> bool:
+    try:
+        secret_key = os.getenv("SECRET_KEY", "cle_secrete_banque_tres_longue_et_securisee_12345")
+        jwt.decode(token.replace("Bearer ", "").strip(), secret_key, algorithms=["HS256"])
+        return True
+    except Exception:
+        return False
