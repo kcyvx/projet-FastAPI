@@ -71,8 +71,14 @@ def connexion(user: UserCreate):
 @app.post("/transactions")
 def Faire_un_transfert(transfert: Transaction):
     
-    source = Lf_db[transfert.source_id]
-    destinataire = Lf_db[transfert.destinataire_id]
+    if transfert.source_id == transfert.destinataire_id:
+        raise HTTPException(status_code=400, detail="Le compte source et le compte destination doivent être différents.")
+
+    source = Lf_db.get(transfert.source_id)
+    destinataire = Lf_db.get(transfert.destinataire_id)
+
+    if not source or not destinataire:
+        raise HTTPException(status_code=404, detail="Compte introuvable.")
 
     try:
         debit(source, transfert.montant)
@@ -87,6 +93,5 @@ def Faire_un_transfert(transfert: Transaction):
         "sender_new_solde": source["solde"],
         "receiver_new_solde": destinataire["solde"]
     }
-
     
     
