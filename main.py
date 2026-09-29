@@ -2,7 +2,7 @@ from pydantic import BaseModel
 from fastapi import FastAPI, HTTPException
 from transaction.transaction import debit, credit, InsufficientBalanceError, InvalidAmountError , Transaction 
 from account.account import Account
-from user.user import UserCreate, hash_password
+from user.user import UserCreate, inscription_user, connexion_user
 app = FastAPI()
 
 # class TransactionType(str,Enum):
@@ -46,21 +46,26 @@ users_db = {}
 
 @app.post("/register")
 def inscription(user: UserCreate):
-    if user.email in users_db:
-        raise HTTPException(status_code=400, detail="Cet email est déjà utilisé")
-    
-    hashed_pwd = hash_password(user.password)
-    new_id = len(users_db) + 1
-    users_db[user.email] = {
-        "id": new_id,
-        "email": user.email,
-        "password": hashed_pwd
-    }
-    return {
-        "message": "Inscription réussie",
-        "user_id": new_id,
-        "email": user.email
-    }
+    try:
+        new_user = inscription_user(users_db, user)
+        return {
+            "message": "Inscription réussie",
+            "user_id": new_user["id"],
+            "email": new_user["email"]
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/login")
+def connexion(user: UserCreate):
+    try:
+        token = connexion_user(users_db, user)
+        return {
+            "access_token": token,
+            "token_type": "bearer"
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     
 @app.post("/transactions")
