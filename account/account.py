@@ -11,9 +11,7 @@ class Account(SQLModel, table=True):
     user_id: int = Field(foreign_key="user.id", index=True)  # Lien avec l'utilisateur
 
 
-# Données reçues du client (Bruno)
-class AccountCreate(BaseModel):
-    user_id: Optional[int] = None
+class AccountCreate(BaseModel):     
     name: str = "Compte Courant"
 
 def AccountInfo(account: Account, user_or_token: Union[int, str, dict]) -> dict:

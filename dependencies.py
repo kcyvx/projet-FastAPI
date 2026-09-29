@@ -1,7 +1,6 @@
 import os
 import jwt
-from fastapi import Depends
-from fastapi import Header, HTTPException
+from fastapi import Depends, Header, HTTPException
 from sqlmodel import Session
 from db.db import get_session
 from repositories.interfaces import AccountRepository, UserRepository
@@ -50,18 +49,3 @@ def is_logged_in(token: str) -> bool:
         return True
     except Exception:
         return False
-
-# --- DÉPENDANCE D'AUTHENTIFICATION AJOUTÉE ---
-def get_current_user(
-    authorization: str = Header(None),
-    token: str = None,
-    user_repo: UserRepository = Depends(get_user_repo)
-) -> dict:
-    """Récupère l'utilisateur connecté à partir du token JWT."""
-    t = authorization or token
-    if not t:
-        raise HTTPException(status_code=401, detail="Token manquant.")
-    try:
-        return user_repo.get_user_from_token(t)
-    except Exception as e:
-        raise HTTPException(status_code=401, detail=str(e))

@@ -1,7 +1,6 @@
-from account.account import AccountInfo
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Header, Depends
-from account.account import Account, AccountCreate
+from contextlib import asynccontextmanager 
+from fastapi import FastAPI, HTTPException, Depends 
+from account.account import Account, AccountCreate, AccountInfo
 from user.user import UserCreate
 from transaction.transaction import Transaction, InvalidAmountError, InsufficientBalanceError
 from repositories.interfaces import AccountRepository, UserRepository
