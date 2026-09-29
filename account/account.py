@@ -11,5 +11,4 @@ class Account(SQLModel, table=True):
 
 # Données reçues du client (Bruno)
 class AccountCreate(BaseModel):
-    user_id: int
-    name: str = "Compte Courant"
+    name: str = "Nouveau Compte Courant"
