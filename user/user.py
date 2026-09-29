@@ -32,3 +32,10 @@ def is_logged_in(token: str) -> bool:
         return True
     except Exception:
         return False
+
+def get_user_from_token(token: str) -> dict:
+    secret_key = os.getenv("SECRET_KEY", "cle_secrete_banque_tres_longue_et_securisee_12345")
+    t = token.replace("Bearer ", "").strip()
+    data = jwt.decode(t, secret_key, algorithms=["HS256"])
+    return {"id": data.get("user_id"), "email": data.get("email")}
+

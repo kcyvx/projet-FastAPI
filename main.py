@@ -1,10 +1,11 @@
+from account.account import AccountInfo
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Header, Depends
 from account.account import Account, AccountCreate
 from user.user import UserCreate
 from transaction.transaction import Transaction, InvalidAmountError, InsufficientBalanceError
 from repositories.interfaces import AccountRepository, UserRepository
-from dependencies import get_account_repo, get_user_repo, is_use_sql, get_current_user
+from dependencies import get_account_repo, get_user_repo, get_current_user, is_use_sql
 from db.db import seed_initial_data
 
 @asynccontextmanager
@@ -40,22 +41,16 @@ def connexion(user: UserCreate, user_repo: UserRepository = Depends(get_user_rep
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/me")
-def mon_profil(
-    authorization: str = Header(None),
-    token: str = None,
-    user_repo: UserRepository = Depends(get_user_repo)
-):
-    t = authorization or token
-    if not t:
-        raise HTTPException(status_code=401, detail="Token manquant.")
-    try:
-        return user_repo.get_user_from_token(t)
-    except Exception as e:
-        raise HTTPException(status_code=401, detail=str(e))
+def mon_profil(user: dict = Depends(get_current_user)):
+    return user
 
 @app.get("/accounts")
-def liste_comptes(account_repo: AccountRepository = Depends(get_account_repo)):
-    return account_repo.get_all()
+def liste_comptes(
+    account_repo: AccountRepository = Depends(get_account_repo),
+    user: dict = Depends(get_current_user)
+):
+    return account_repo.get_by_user_id(user["id"])
+
 
 @app.post("/transactions")
 def Faire_un_transfert(
@@ -102,3 +97,14 @@ def ouvrir_compte(
         "message": "Compte bancaire ouvert avec succès",
         "account": nouveau_compte
     }
+
+@app.get("/accounts/{account_id}")
+def get_account_info(
+    account_id: int,
+    account_repo: AccountRepository = Depends(get_account_repo),
+    user: dict = Depends(get_current_user)
+):
+    account = account_repo.get_by_id(account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="Compte introuvable.")
+    return AccountInfo(account, user["id"])

@@ -29,6 +29,20 @@ def get_user_repo(session: Session = Depends(get_session)) -> UserRepository:
         return SqlUserRepository(session)
     return _fake_user_repo
 
+def get_current_user(
+    authorization: str = Header(None),
+    token: str = None,
+    user_repo: UserRepository = Depends(get_user_repo)
+) -> dict:
+    """Dépendance FastAPI réutilisable pour authentifier l'utilisateur via son JWT."""
+    t = authorization or token
+    if not t:
+        raise HTTPException(status_code=401, detail="Token manquant.")
+    try:
+        return user_repo.get_user_from_token(t)
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Token invalide : {str(e)}")
+
 def is_logged_in(token: str) -> bool:
     try:
         secret_key = os.getenv("SECRET_KEY", "cle_secrete_banque_tres_longue_et_securisee_12345")

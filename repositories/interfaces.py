@@ -12,6 +12,11 @@ class AccountRepository(Protocol):
         """Récupère tous les comptes."""
         ...
 
+    def get_by_user_id(self, user_id: int) -> List[Account]:
+        """Récupère tous les comptes appartenant à un utilisateur spécifique."""
+        ...
+
+
     def create(self, name: str, user_id: int) -> Account:
         """Crée un nouveau compte bancaire avec un solde initial de 0.0."""
         ...
