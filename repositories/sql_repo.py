@@ -16,6 +16,10 @@ class SqlAccountRepository:
     def get_all(self) -> List[Account]:
         return self.session.exec(select(Account)).all()
 
+    def get_by_user_id(self, user_id: int) -> List[Account]:
+        return self.session.exec(select(Account).where(Account.user_id == user_id)).all()
+
+
     # --- NOUVELLE MÉTHODE US 4 ---
     def create(self, name: str, user_id: int) -> Account:
         new_account = Account(

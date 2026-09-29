@@ -20,6 +20,10 @@ class FakeAccountRepository:
     def get_all(self) -> List[Account]:
         return list(self.accounts.values())
 
+    def get_by_user_id(self, user_id: int) -> List[Account]:
+        return [acc for acc in self.accounts.values() if acc.user_id == user_id]
+
+
     # --- NOUVELLE MÉTHODE US 4 ---
     def create(self, name: str, user_id: int) -> Account:
         new_id = max(self.accounts.keys(), default=0) + 1
