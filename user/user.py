@@ -28,3 +28,11 @@ def connexion_user(users_db, user):
         raise ValueError("Email ou mot de passe incorrect.")
     
     return jwt.encode({"user_id": u["id"], "email": u["email"]}, os.getenv("SECRET_KEY"), algorithm="HS256")
+
+def get_user_info(users_db, token):
+    t = token.replace("Bearer ", "")
+    data = jwt.decode(t, os.getenv("SECRET_KEY"), algorithms=["HS256"])
+    user = users_db.get(data["email"])
+    if not user:
+        raise ValueError("Utilisateur introuvable.")
+    return {"id": user["id"], "email": user["email"]}

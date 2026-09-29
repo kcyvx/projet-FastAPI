@@ -1,8 +1,8 @@
 from pydantic import BaseModel
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header
 from transaction.transaction import debit, credit, InsufficientBalanceError, InvalidAmountError , Transaction 
 from account.account import Account
-from user.user import UserCreate, inscription_user, connexion_user
+from user.user import UserCreate, inscription_user, connexion_user, get_user_info
 app = FastAPI()
 
 # class TransactionType(str,Enum):
@@ -66,6 +66,16 @@ def connexion(user: UserCreate):
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/me")
+def mon_profil(authorization: str = Header(None), token: str = None):
+    t = authorization or token
+    if not t:
+        raise HTTPException(status_code=401, detail="Token manquant.")
+    try:
+        return get_user_info(users_db, t)
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=str(e))
 
     
 @app.post("/transactions")
