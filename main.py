@@ -1,11 +1,8 @@
-# from typing_extensions import Optional
-# from enum import Enum
 from pydantic import BaseModel
 from fastapi import FastAPI, HTTPException
 from transaction.transaction import debit, credit, InsufficientBalanceError, InvalidAmountError , Transaction 
 from account.account import Account
-# from sqlmodel import SQLModel, Field
-# from datetime import datetime, timezone
+from user.user import UserCreate, hash_password
 app = FastAPI()
 
 # class TransactionType(str,Enum):
@@ -44,6 +41,27 @@ Lf_db={
     1: {"name": "Alice", "solde": 100.0},
     2: {"name": "Bob", "solde": 100.0},
 } 
+
+users_db = {}
+
+@app.post("/register")
+def inscription(user: UserCreate):
+    if user.email in users_db:
+        raise HTTPException(status_code=400, detail="Cet email est déjà utilisé")
+    
+    hashed_pwd = hash_password(user.password)
+    new_id = len(users_db) + 1
+    users_db[user.email] = {
+        "id": new_id,
+        "email": user.email,
+        "password": hashed_pwd
+    }
+    return {
+        "message": "Inscription réussie",
+        "user_id": new_id,
+        "email": user.email
+    }
+
     
 @app.post("/transactions")
 def Faire_un_transfert(transfert: Transaction):
