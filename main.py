@@ -1,65 +1,37 @@
-from pydantic import BaseModel
-from fastapi import FastAPI, HTTPException, Header
-from transaction.transaction import debit, credit, InsufficientBalanceError, InvalidAmountError , Transaction 
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException, Header, Depends
 from account.account import Account
-from user.user import UserCreate, inscription_user, connexion_user, get_user_info
-app = FastAPI()
+from user.user import UserCreate
+from transaction.transaction import Transaction, InvalidAmountError, InsufficientBalanceError
+from repositories.interfaces import AccountRepository, UserRepository
+from dependencies import get_account_repo, get_user_repo, is_use_sql
+from db.db import seed_initial_data
 
-# class TransactionType(str,Enum):
-#     DEPOT = "DEPOT"
-#     TRANSFER ="TRANSFER"
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Initialise les tables et les données par défaut en mode SQL
+    if is_use_sql():
+        seed_initial_data()
+    yield
 
-# class TransactionStatus(str, Enum):
-#     PENDING = "pending"
-#     COMPLETED = "completed"
-#     CANCELLED = "cancelled"
-
-
-# class Account(SQLModel, table=True):
-#     id: int = Field(default=None, primary_key=True)
-#     account_number: str = Field(unique=True, index=True)
-#     balance: float = Field(default=0.0)
-#     is_main: bool = Field(default=False)
-#     is_closed: bool = Field(default=False)
-#     user_id: int = Field(index=True)
-
-# class Transaction(SQLModel, table=True):
-#     id: int = Field(default=None, primary_key=True)
-#     source_account_id:int = Field(default=None, foreign_key="account.id", index=True)
-#     destination_account_id: int = Field(foreign_key="account.id", index=True)
-#     amount: float
-#     type: TransactionType
-#     status: TransactionStatus = Field(default=TransactionStatus.PENDING)
-#     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    
-    
-
-
-    
-
-Lf_db={
-    1: {"name": "Alice", "solde": 100.0},
-    2: {"name": "Bob", "solde": 100.0},
-} 
-
-users_db = {}
+app = FastAPI(lifespan=lifespan)
 
 @app.post("/register")
-def inscription(user: UserCreate):
+def inscription(user: UserCreate, user_repo: UserRepository = Depends(get_user_repo)):
     try:
-        new_user = inscription_user(users_db, user)
+        new_user = user_repo.create(user)
         return {
             "message": "Inscription réussie",
-            "user_id": new_user["id"],
-            "email": new_user["email"]
+            "user_id": new_user.id,
+            "email": new_user.email
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/login")
-def connexion(user: UserCreate):
+def connexion(user: UserCreate, user_repo: UserRepository = Depends(get_user_repo)):
     try:
-        token = connexion_user(users_db, user)
+        token = user_repo.authenticate(user)
         return {
             "access_token": token,
             "token_type": "bearer"
@@ -68,40 +40,50 @@ def connexion(user: UserCreate):
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/me")
-def mon_profil(authorization: str = Header(None), token: str = None):
+def mon_profil(
+    authorization: str = Header(None),
+    token: str = None,
+    user_repo: UserRepository = Depends(get_user_repo)
+):
     t = authorization or token
     if not t:
         raise HTTPException(status_code=401, detail="Token manquant.")
     try:
-        return get_user_info(users_db, t)
+        return user_repo.get_user_from_token(t)
     except Exception as e:
         raise HTTPException(status_code=401, detail=str(e))
 
-    
+@app.get("/accounts")
+def liste_comptes(account_repo: AccountRepository = Depends(get_account_repo)):
+    return account_repo.get_all()
+
 @app.post("/transactions")
-def Faire_un_transfert(transfert: Transaction):
-    
+def Faire_un_transfert(
+    transfert: Transaction,
+    account_repo: AccountRepository = Depends(get_account_repo)
+):
     if transfert.source_id == transfert.destinataire_id:
         raise HTTPException(status_code=400, detail="Le compte source et le compte destination doivent être différents.")
 
-    source = Lf_db.get(transfert.source_id)
-    destinataire = Lf_db.get(transfert.destinataire_id)
+    source = account_repo.get_by_id(transfert.source_id)
+    destinataire = account_repo.get_by_id(transfert.destinataire_id)
 
     if not source or not destinataire:
         raise HTTPException(status_code=404, detail="Compte introuvable.")
 
     try:
-        debit(source, transfert.montant)
-        credit(destinataire, transfert.montant)
+        source, destinataire, tx = account_repo.transfer(
+            transfert.source_id,
+            transfert.destinataire_id,
+            transfert.montant
+        )
     except (InvalidAmountError, InsufficientBalanceError) as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    summary = f"Transfert de {transfert.montant}€ de {source['name']} (ID: {transfert.source_id}) vers {destinataire['name']} (ID: {transfert.destinataire_id})"
+    summary = f"Transfert de {transfert.montant}€ de {source.name} (ID: {transfert.source_id}) vers {destinataire.name} (ID: {transfert.destinataire_id})"
     return {
         "status": "success",
         "summary": summary,
-        "sender_new_solde": source["solde"],
-        "receiver_new_solde": destinataire["solde"]
+        "sender_new_solde": source.solde,
+        "receiver_new_solde": destinataire.solde
     }
-    
-    

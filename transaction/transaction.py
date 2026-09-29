@@ -1,10 +1,11 @@
-from pydantic import BaseModel
-class Transaction(BaseModel):
+from typing import Optional, Any
+from sqlmodel import SQLModel, Field
+
+class Transaction(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
     source_id: int
     destinataire_id: int
-    montant:float
-
-
+    montant: float
 
 class InsufficientBalanceError(Exception):
     """Exception levée en cas de solde insuffisant."""
@@ -14,22 +15,28 @@ class InvalidAmountError(Exception):
     """Exception levée si le montant est <= 0."""
     pass
 
-def credit(account: dict, amount: float) -> float:
-    """Ajoute de l'argent au compte."""
+def credit(account: Any, amount: float) -> float:
+    """Ajoute de l'argent au compte (compatible objet SQLModel et dict)."""
     if amount <= 0:
-        raise InvalidAmountError("Le montant à créditer doit être strictement positif.")
-    key = "solde" if "solde" in account else "balance"
-    account[key] += amount
-    return account[key]
+        raise InvalidAmountError("Le montant doit être strictement positif.")
+    val = getattr(account, "solde", None) if not isinstance(account, dict) else account.get("solde")
+    new_val = round(val + amount, 2)
+    if isinstance(account, dict):
+        account["solde"] = new_val
+    else:
+        account.solde = new_val
+    return new_val
 
-def debit(account: dict, amount: float) -> float:
-    """Retire de l'argent du compte après vérification du solde."""
+def debit(account: Any, amount: float) -> float:
+    """Retire de l'argent du compte après vérification du solde (compatible objet SQLModel et dict)."""
     if amount <= 0:
-        raise InvalidAmountError("Le montant à débiter doit être strictement positif.")
-    key = "solde" if "solde" in account else "balance"
-    if account[key] < amount:
-        raise InsufficientBalanceError(
-            f"Solde insuffisant ({account[key]:.2f}€ disponibles, {amount:.2f}€ requis)."
-        )
-    account[key] -= amount
-    return account[key]
+        raise InvalidAmountError("Le montant doit être strictement positif.")
+    val = getattr(account, "solde", None) if not isinstance(account, dict) else account.get("solde")
+    if val < amount:
+        raise InsufficientBalanceError(f"Solde insuffisant ({val:.2f} € disponibles, {amount:.2f} € requis).")
+    new_val = round(val - amount, 2)
+    if isinstance(account, dict):
+        account["solde"] = new_val
+    else:
+        account.solde = new_val
+    return new_val
