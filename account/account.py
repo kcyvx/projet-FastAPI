@@ -8,7 +8,7 @@ class Account(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
     solde: float = Field(default=0.0)
-    user_id: int = Field(foreign_key="user.id", index=True)  # Lien avec l'utilisateur
+    user_id: int = Field(foreign_key="user.id", index=True)  
 
 
 class AccountCreate(BaseModel):     

@@ -28,7 +28,6 @@ def _get_next_pending_id() -> int:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialise les tables et les données par défaut en mode SQL
     if is_use_sql():
         seed_initial_data()
     yield
@@ -126,7 +125,6 @@ async def Faire_un_transfert(
             detail="Action non autorisée : vous ne pouvez initier un virement que depuis vos propres comptes."
         )
 
-    # Vérification du solde disponible en tenant compte des transactions encore en flottement
     pending_amount = sum(
         t.montant for t in PENDING_TRANSFERS.values()
         if t.source_id == transfert.source_id and getattr(t, "statut", None) == TransferStatus.PENDING.value
@@ -138,7 +136,6 @@ async def Faire_un_transfert(
             detail=f"Solde insuffisant ({solde_disponible:.2f} € disponibles, {transfert.montant:.2f} € requis)."
         )
 
-    # 1. Mise dans le dictionnaire des transactions en cours avec statut PENDING
     pending_id = _get_next_pending_id()
     pending_tx = Transaction(
         id=pending_id,
@@ -151,17 +148,13 @@ async def Faire_un_transfert(
     )
     PENDING_TRANSFERS[pending_id] = pending_tx
 
-    # 2. Moment de flottement de 5 secondes (défaut 5s, ajustable par env pour tests rapides)
     delay = float(os.getenv("TRANSFER_DELAY_SECONDS", "5.0"))
     if delay > 0:
         await asyncio.sleep(delay)
-
-    # 3. Vérification si la transaction a été annulée durant le moment de flottement
     current_tx = PENDING_TRANSFERS.get(pending_id)
     if not current_tx or current_tx.statut in (TransferStatus.REJECTED.value, TransferStatus.CANCELLED.value):
         raise HTTPException(status_code=400, detail="La transaction a été annulée durant le délai de rétractation.")
 
-    # 4. Validation et envoi en base de données après le flottement
     try:
         source, destinataire, tx = account_repo.transfer(
             transfert.source_id,
@@ -173,7 +166,6 @@ async def Faire_un_transfert(
             PENDING_TRANSFERS[pending_id].statut = TransferStatus.REJECTED.value
         raise HTTPException(status_code=400, detail=str(e))
 
-    # Mise à jour dans le dictionnaire avec la transaction finale validée
     PENDING_TRANSFERS[pending_id] = tx
     PENDING_TRANSFERS[pending_id].statut = TransferStatus.APPROVED.value
 
@@ -245,3 +237,21 @@ def deposer_argent(
         }
     except InvalidAmountError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/accounts/{account_id}/transactions")
+def voir_transactions_compte(
+    account_id: int,
+    user: dict = Depends(get_current_user),
+    account_repo: AccountRepository = Depends(get_account_repo)
+):
+    account = account_repo.get_by_id(account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="Compte introuvable.")
+    if account.user_id != user["id"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Action non autorisée : vous ne pouvez consulter que l'historique de vos propres comptes."
+        )
+
+    return account_repo.get_transactions_by_account_id(account_id)

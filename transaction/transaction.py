@@ -39,19 +39,16 @@ class TransferRequest(BaseModel):
     @classmethod
     def unify_fields(cls, values: Any) -> Any:
         if isinstance(values, dict):
-            # Normalisation source_account -> source_id
             if "source_id" not in values and "source_account" in values:
                 try:
                     values["source_id"] = int(values["source_account"])
                 except (ValueError, TypeError):
                     values["source_id"] = values["source_account"]
-            # Normalisation target_account -> destinataire_id
             if "destinataire_id" not in values and "target_account" in values:
                 try:
                     values["destinataire_id"] = int(values["target_account"])
                 except (ValueError, TypeError):
                     values["destinataire_id"] = values["target_account"]
-            # Normalisation amount -> montant
             if "montant" not in values and "amount" in values:
                 values["montant"] = values["amount"]
         return values

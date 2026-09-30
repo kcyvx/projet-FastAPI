@@ -5,7 +5,6 @@ from transaction.transaction import Transaction, debit, credit
 
 class FakeAccountRepository:
     def __init__(self):
-        # Base en mémoire initialisée avec Alice et Bob
         self.accounts: dict[int, Account] = {
             1: Account(id=1, name="Alice", solde=100.0),
             2: Account(id=2, name="Bob", solde=100.0),
@@ -21,8 +20,13 @@ class FakeAccountRepository:
     def get_by_user_id(self, user_id: int) -> List[Account]:
         return [acc for acc in self.accounts.values() if acc.user_id == user_id]
 
+    def get_transactions_by_account_id(self, account_id: int) -> List[Transaction]:
+        txs = [
+            tx for tx in self.transactions
+            if tx.source_id == account_id or tx.destinataire_id == account_id
+        ]
+        return sorted(txs, key=lambda t: t.created_at, reverse=True)
 
-    # --- NOUVELLE MÉTHODE US 4 ---
     def create(self, name: str, user_id: int) -> Account:
         new_id = max(self.accounts.keys(), default=0) + 1
         new_account = Account(

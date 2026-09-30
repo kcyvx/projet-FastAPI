@@ -1,5 +1,5 @@
 from typing import Optional, List
-from sqlmodel import Session, select
+from sqlmodel import Session, select, or_
 from account.account import Account
 from user.user import User, UserCreate, hash_password
 from transaction.transaction import Transaction, debit, credit
@@ -17,13 +17,20 @@ class SqlAccountRepository:
     def get_by_user_id(self, user_id: int) -> List[Account]:
         return self.session.exec(select(Account).where(Account.user_id == user_id)).all()
 
+    def get_transactions_by_account_id(self, account_id: int) -> List[Transaction]:
+        statement = (
+            select(Transaction)
+            .where(or_(Transaction.source_id == account_id, Transaction.destinataire_id == account_id))
+            .order_by(Transaction.created_at.desc())
+        )
+        return list(self.session.exec(statement).all())
 
-    # --- NOUVELLE MÉTHODE US 4 ---
+
     def create(self, name: str, user_id: int) -> Account:
         new_account = Account(
             name=name,
             user_id=user_id,
-            solde=0.0          # Règle Story 4 : solde à 0€ obligatoire
+            solde=0.0         
         )
         try:
             self.session.add(new_account)

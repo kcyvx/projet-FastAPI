@@ -29,6 +29,10 @@ class AccountRepository(Protocol):
         """Effectue un virement atomique entre deux comptes et enregistre la transaction."""
         ...
 
+    def get_transactions_by_account_id(self, account_id: int) -> List[Transaction]:
+        """Récupère toutes les transactions d'un compte (débit ou crédit), triées par date décroissante."""
+        ...
+
 class UserRepository(Protocol):
     def get_by_email(self, email: str) -> Optional[User]:
         """Récupère un utilisateur par son adresse email."""
