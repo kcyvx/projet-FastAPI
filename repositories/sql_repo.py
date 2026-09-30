@@ -2,7 +2,7 @@ from typing import Optional, List
 from sqlmodel import Session, select, or_
 from account.account import Account
 from user.user import User, UserCreate, hash_password
-from transaction.transaction import Transaction, debit, credit
+from transaction.transaction import Transaction, TransferStatus, debit, credit
 
 class SqlAccountRepository:
     def __init__(self, session: Session):
@@ -12,10 +12,10 @@ class SqlAccountRepository:
         return self.session.get(Account, account_id)
 
     def get_all(self) -> List[Account]:
-        return self.session.exec(select(Account)).all()
+        return list(self.session.exec(select(Account)).all())
 
     def get_by_user_id(self, user_id: int) -> List[Account]:
-        return self.session.exec(select(Account).where(Account.user_id == user_id)).all()
+        return list(self.session.exec(select(Account).where(Account.user_id == user_id)).all())
 
     def get_transactions_by_account_id(self, account_id: int) -> List[Transaction]:
         statement = (
@@ -25,13 +25,8 @@ class SqlAccountRepository:
         )
         return list(self.session.exec(statement).all())
 
-
-    def create(self, name: str, user_id: int) -> Account:
-        new_account = Account(
-            name=name,
-            user_id=user_id,
-            solde=0.0         
-        )
+    def create(self, name: str, user_id: int, solde: float = 0.0, is_main: bool = False) -> Account:
+        new_account = Account(name=name, user_id=user_id, solde=solde, is_main=is_main)
         try:
             self.session.add(new_account)
             self.session.commit()
@@ -42,18 +37,17 @@ class SqlAccountRepository:
             raise
 
     def deposit(self, account_id: int, montant: float) -> tuple[Account, Transaction]:
-        account = self.session.get(Account, account_id)
+        account = self.get_by_id(account_id)
         if not account:
             raise KeyError("Compte introuvable.")
 
         try:
             credit(account, montant)
             tx = Transaction(
-                source_id=None,
                 destinataire_id=account_id,
                 montant=montant,
                 type="DEPOT",
-                statut="approved"
+                statut=TransferStatus.APPROVED.value
             )
             self.session.add(account)
             self.session.add(tx)
@@ -64,24 +58,74 @@ class SqlAccountRepository:
         except Exception:
             self.session.rollback()
             raise
-    def transfer(self, source_id: int, destinataire_id: int, montant: float) -> tuple[Account, Account, Transaction]:
-        """Effectue un virement atomique avec commit et rollback automatique en cas d'erreur."""
-        source = self.session.get(Account, source_id)
-        destinataire = self.session.get(Account, destinataire_id)
+
+    def create_pending_transfer(self, source_id: int, destinataire_id: int, montant: float) -> Transaction:
+        tx = Transaction(
+            source_id=source_id,
+            destinataire_id=destinataire_id,
+            montant=montant,
+            type="VIREMENT",
+            statut=TransferStatus.PENDING.value
+        )
+        try:
+            self.session.add(tx)
+            self.session.commit()
+            self.session.refresh(tx)
+            return tx
+        except Exception:
+            self.session.rollback()
+            raise
+
+    def get_transaction_by_id(self, transaction_id: int) -> Optional[Transaction]:
+        self.session.expire_all()
+        return self.session.get(Transaction, transaction_id)
+
+    def get_pending_transactions(self) -> List[Transaction]:
+        self.session.expire_all()
+        return list(self.session.exec(
+            select(Transaction).where(Transaction.statut == TransferStatus.PENDING.value)
+        ).all())
+
+    def get_pending_amount_by_source(self, source_id: int) -> float:
+        self.session.expire_all()
+        pending_txs = self.session.exec(
+            select(Transaction).where(
+                Transaction.source_id == source_id,
+                Transaction.statut == TransferStatus.PENDING.value
+            )
+        ).all()
+        return round(sum(t.montant for t in pending_txs), 2)
+
+    def cancel_transaction(self, transaction_id: int) -> Optional[Transaction]:
+        self.session.expire_all()
+        tx = self.session.get(Transaction, transaction_id)
+        if not tx:
+            return None
+        tx.statut = TransferStatus.CANCELLED.value
+        try:
+            self.session.add(tx)
+            self.session.commit()
+            self.session.refresh(tx)
+            return tx
+        except Exception:
+            self.session.rollback()
+            raise
+
+    def finalize_transfer(self, transaction_id: int) -> tuple[Account, Account, Transaction]:
+        self.session.expire_all()
+        tx = self.session.get(Transaction, transaction_id)
+        if not tx:
+            raise KeyError("Transaction introuvable.")
+
+        source = self.session.get(Account, tx.source_id)
+        destinataire = self.session.get(Account, tx.destinataire_id)
         if not source or not destinataire:
             raise KeyError("Compte introuvable.")
 
         try:
-            debit(source, montant)
-            credit(destinataire, montant)
-
-            tx = Transaction(
-                source_id=source_id,
-                destinataire_id=destinataire_id,
-                montant=montant,
-                type="VIREMENT",
-                statut="approved"
-            )
+            debit(source, tx.montant)
+            credit(destinataire, tx.montant)
+            tx.statut = TransferStatus.APPROVED.value
             self.session.add(source)
             self.session.add(destinataire)
             self.session.add(tx)
@@ -92,6 +136,9 @@ class SqlAccountRepository:
             return source, destinataire, tx
         except Exception:
             self.session.rollback()
+            tx.statut = TransferStatus.REJECTED.value
+            self.session.add(tx)
+            self.session.commit()
             raise
 
 class SqlUserRepository:

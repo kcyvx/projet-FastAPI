@@ -8,7 +8,8 @@ class Account(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
     solde: float = Field(default=0.0)
-    user_id: int = Field(foreign_key="user.id", index=True)  
+    user_id: int = Field(foreign_key="user.id", index=True)
+    is_main: bool = Field(default=False)
 
 
 class AccountCreate(BaseModel):     
@@ -36,5 +37,6 @@ def AccountInfo(account: Account, user_or_token: Union[int, str, dict]) -> dict:
         "id": account.id,
         "user_id": account.user_id,
         "name": account.name,
-        "solde": account.solde
+        "solde": account.solde,
+        "is_main": account.is_main
     }
