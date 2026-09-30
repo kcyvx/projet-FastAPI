@@ -36,6 +36,23 @@ class FakeAccountRepository:
         self.accounts[new_id] = new_account
         return new_account
 
+    def deposit(self, account_id: int, montant: float) -> tuple[Account, Transaction]:
+        account = self.get_by_id(account_id)
+        if not account:
+            raise KeyError("Compte introuvable.")
+
+        credit(account, montant)
+
+        tx = Transaction(
+            id=len(self.transactions) + 1,
+            source_id=None,
+            destinataire_id=account_id,
+            montant=montant,
+            type="DEPOT"
+        )
+        self.transactions.append(tx)
+        return account, tx
+
     def transfer(self, source_id: int, destinataire_id: int, montant: float) -> tuple[Account, Account, Transaction]:
         source = self.get_by_id(source_id)
         destinataire = self.get_by_id(destinataire_id)

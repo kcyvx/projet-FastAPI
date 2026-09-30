@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends 
 from account.account import Account, AccountCreate, AccountInfo
 from user.user import UserCreate
-from transaction.transaction import Transaction, InvalidAmountError, InsufficientBalanceError
+from transaction.transaction import Transaction, InvalidAmountError, InsufficientBalanceError, DepositRequest
 from repositories.interfaces import AccountRepository, UserRepository
 from dependencies import get_account_repo, get_user_repo, get_current_user, is_use_sql
 from db.db import seed_initial_data
@@ -107,3 +107,33 @@ def get_account_info(
     if not account:
         raise HTTPException(status_code=404, detail="Compte introuvable.")
     return AccountInfo(account, user["id"])
+
+
+@app.post("/accounts/{account_id}/deposit")
+def deposer_argent(
+    account_id: int,
+    payload: DepositRequest,
+    user: dict = Depends(get_current_user),
+    account_repo: AccountRepository = Depends(get_account_repo)
+):
+    account = account_repo.get_by_id(account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="Compte introuvable.")
+
+    if account.user_id != user["id"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Action non autorisée : vous ne pouvez déposer que sur vos propres comptes."
+        )
+
+    try:
+        updated_account, tx = account_repo.deposit(account_id, payload.montant)
+        return {
+            "message": f"Dépôt de {payload.montant} € effectué avec succès.",
+            "account_id": updated_account.id,
+            "nouveau_solde": updated_account.solde,
+            "transaction_id": tx.id,
+            "date": tx.created_at
+        }
+    except InvalidAmountError as e:
+        raise HTTPException(status_code=400, detail=str(e))

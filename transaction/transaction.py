@@ -1,11 +1,22 @@
+from datetime import datetime, timezone
 from typing import Optional, Any
+from pydantic import BaseModel, Field as PydanticField
 from sqlmodel import SQLModel, Field
 
 class Transaction(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    source_id: int
-    destinataire_id: int
+    source_id: Optional[int] = Field(default=None, nullable=True)
+    destinataire_id: int = Field(index=True)
     montant: float
+    type: str = Field(default="DEPOT")
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
+
+
+class DepositRequest(BaseModel):
+    montant: float = PydanticField(..., gt=0, description="Le montant doit être strictement supérieur à 0.")
 
 class InsufficientBalanceError(Exception):
     """Exception levée en cas de solde insuffisant."""

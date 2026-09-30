@@ -36,6 +36,31 @@ class SqlAccountRepository:
             self.session.rollback()
             raise
 
+
+    def deposit(self, account_id: int, montant: float) -> tuple[Account, Transaction]:
+        account = self.session.get(Account, account_id)
+        if not account:
+            raise KeyError("Compte introuvable.")
+
+        try:
+            credit(account, montant)
+            tx = Transaction(
+                source_id=None,
+                destinataire_id=account_id,
+                montant=montant,
+                type="DEPOT"
+            )
+            self.session.add(account)
+            self.session.add(tx)
+            self.session.commit()
+            self.session.refresh(account)
+            self.session.refresh(tx)
+            return account, tx
+        except Exception:
+            self.session.rollback()
+            raise
+    
+    
     def transfer(self, source_id: int, destinataire_id: int, montant: float) -> tuple[Account, Account, Transaction]:
         """Effectue un virement atomique avec commit et rollback automatique en cas d'erreur."""
         source = self.session.get(Account, source_id)
