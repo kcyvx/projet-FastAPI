@@ -39,3 +39,13 @@ def get_user_from_token(token: str) -> dict:
     data = jwt.decode(t, secret_key, algorithms=["HS256"])
     return {"id": data.get("user_id"), "email": data.get("email")}
 
+def create_access_token(user_id: int, email: str) -> str:
+    secret_key = os.getenv("SECRET_KEY", "cle_secrete_banque_tres_longue_et_securisee_12345")
+    return jwt.encode({"user_id": user_id, "email": email}, secret_key, algorithm="HS256")
+
+def authenticate(user_repo, user_in: UserCreate) -> str:
+    u = user_repo.get_by_email(user_in.email)
+    if not u or not verify_password(user_in.password, u.password):
+        raise ValueError("Email ou mot de passe incorrect.")
+    return create_access_token(u.id, u.email)
+

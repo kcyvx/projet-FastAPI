@@ -1,11 +1,12 @@
 import os
-import jwt
 from fastapi import Depends, Header, HTTPException
 from sqlmodel import Session
 from db.db import get_session
 from repositories.interfaces import AccountRepository, UserRepository
 from repositories.fake_repo import FakeAccountRepository, FakeUserRepository
 from repositories.sql_repo import SqlAccountRepository, SqlUserRepository
+
+from user.user import get_user_from_token, is_logged_in
 
 def is_use_sql() -> bool:
     """Vérifie la variable d'environnement USE_SQL (vrai par défaut si 'true', '1', 'yes')."""
@@ -38,14 +39,13 @@ def get_current_user(
     if not t:
         raise HTTPException(status_code=401, detail="Token manquant.")
     try:
-        return user_repo.get_user_from_token(t)
+        user_info = get_user_from_token(t)
+        u = user_repo.get_by_id(user_info["id"])
+        if not u:
+            raise ValueError("Utilisateur introuvable.")
+        return {"id": u.id, "email": u.email}
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"Token invalide : {str(e)}")
 
-def is_logged_in(token: str) -> bool:
-    try:
-        secret_key = os.getenv("SECRET_KEY", "cle_secrete_banque_tres_longue_et_securisee_12345")
-        jwt.decode(token.replace("Bearer ", "").strip(), secret_key, algorithms=["HS256"])
-        return True
-    except Exception:
-        return False
+
+

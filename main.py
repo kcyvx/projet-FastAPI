@@ -1,8 +1,8 @@
 from contextlib import asynccontextmanager 
 from fastapi import FastAPI, HTTPException, Depends 
 from account.account import Account, AccountCreate, AccountInfo
-from user.user import UserCreate
-from transaction.transaction import Transaction, InvalidAmountError, InsufficientBalanceError, DepositRequest
+from user.user import UserCreate, authenticate
+from transaction.transaction import Transaction, InvalidAmountError, InsufficientBalanceError, DepositRequest, TransferRequest
 from repositories.interfaces import AccountRepository, UserRepository
 from dependencies import get_account_repo, get_user_repo, get_current_user, is_use_sql
 from db.db import seed_initial_data
@@ -31,7 +31,7 @@ def inscription(user: UserCreate, user_repo: UserRepository = Depends(get_user_r
 @app.post("/login")
 def connexion(user: UserCreate, user_repo: UserRepository = Depends(get_user_repo)):
     try:
-        token = user_repo.authenticate(user)
+        token = authenticate(user_repo, user)
         return {
             "access_token": token,
             "token_type": "bearer"
@@ -53,7 +53,8 @@ def liste_comptes(
 
 @app.post("/transactions")
 def Faire_un_transfert(
-    transfert: Transaction,
+    transfert: TransferRequest,
+    current_user: dict = Depends(get_current_user),
     account_repo: AccountRepository = Depends(get_account_repo)
 ):
     if transfert.source_id == transfert.destinataire_id:
@@ -64,6 +65,12 @@ def Faire_un_transfert(
 
     if not source or not destinataire:
         raise HTTPException(status_code=404, detail="Compte introuvable.")
+
+    if source.user_id != current_user["id"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Action non autorisée : vous ne pouvez initier un virement que depuis vos propres comptes."
+        )
 
     try:
         source, destinataire, tx = account_repo.transfer(
@@ -76,11 +83,14 @@ def Faire_un_transfert(
 
     summary = f"Transfert de {transfert.montant}€ de {source.name} (ID: {transfert.source_id}) vers {destinataire.name} (ID: {transfert.destinataire_id})"
     return {
-        "status": "success",
+        "status": "pending",
         "summary": summary,
         "sender_new_solde": source.solde,
-        "receiver_new_solde": destinataire.solde
+        "receiver_new_solde": destinataire.solde,
+        "transaction_id": tx.id
     }
+
+
 
 @app.post("/accounts", status_code=201)
 def ouvrir_compte(
@@ -96,6 +106,7 @@ def ouvrir_compte(
         "message": "Compte bancaire ouvert avec succès",
         "account": nouveau_compte
     }
+
 
 @app.get("/accounts/{account_id}")
 def get_account_info(

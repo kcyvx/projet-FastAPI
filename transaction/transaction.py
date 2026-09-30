@@ -18,6 +18,11 @@ class Transaction(SQLModel, table=True):
 class DepositRequest(BaseModel):
     montant: float = PydanticField(..., gt=0, description="Le montant doit être strictement supérieur à 0.")
 
+class TransferRequest(BaseModel):
+    source_id: int
+    destinataire_id: int
+    montant: float = PydanticField(..., gt=0, description="Le montant doit être strictement supérieur à 0.")
+
 class InsufficientBalanceError(Exception):
     """Exception levée en cas de solde insuffisant."""
     pass

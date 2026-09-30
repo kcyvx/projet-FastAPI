@@ -1,9 +1,7 @@
-import os
 from typing import Optional, List
-import jwt
 from sqlmodel import Session, select
 from account.account import Account
-from user.user import User, UserCreate, hash_password, verify_password
+from user.user import User, UserCreate, hash_password
 from transaction.transaction import Transaction, debit, credit
 
 class SqlAccountRepository:
@@ -36,7 +34,6 @@ class SqlAccountRepository:
             self.session.rollback()
             raise
 
-
     def deposit(self, account_id: int, montant: float) -> tuple[Account, Transaction]:
         account = self.session.get(Account, account_id)
         if not account:
@@ -59,8 +56,6 @@ class SqlAccountRepository:
         except Exception:
             self.session.rollback()
             raise
-    
-    
     def transfer(self, source_id: int, destinataire_id: int, montant: float) -> tuple[Account, Account, Transaction]:
         """Effectue un virement atomique avec commit et rollback automatique en cas d'erreur."""
         source = self.session.get(Account, source_id)
@@ -75,7 +70,8 @@ class SqlAccountRepository:
             tx = Transaction(
                 source_id=source_id,
                 destinataire_id=destinataire_id,
-                montant=montant
+                montant=montant,
+                type="VIREMENT"
             )
             self.session.add(source)
             self.session.add(destinataire)
@@ -115,19 +111,3 @@ class SqlUserRepository:
         except Exception:
             self.session.rollback()
             raise
-
-    def authenticate(self, user_in: UserCreate) -> str:
-        u = self.get_by_email(user_in.email)
-        if not u or not verify_password(user_in.password, u.password):
-            raise ValueError("Email ou mot de passe incorrect.")
-        secret_key = os.getenv("SECRET_KEY", "cle_secrete_banque_tres_longue_et_securisee_12345")
-        return jwt.encode({"user_id": u.id, "email": u.email}, secret_key, algorithm="HS256")
-
-    def get_user_from_token(self, token: str) -> dict:
-        secret_key = os.getenv("SECRET_KEY", "cle_secrete_banque_tres_longue_et_securisee_12345")
-        t = token.replace("Bearer ", "").strip()
-        data = jwt.decode(t, secret_key, algorithms=["HS256"])
-        u = self.get_by_email(data.get("email"))
-        if not u:
-            raise ValueError("Utilisateur introuvable.")
-        return {"id": u.id, "email": u.email}

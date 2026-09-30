@@ -41,11 +41,3 @@ class UserRepository(Protocol):
     def create(self, user_in: UserCreate) -> User:
         """Crée et enregistre un nouvel utilisateur."""
         ...
-
-    def authenticate(self, user_in: UserCreate) -> str:
-        """Vérifie les identifiants et génère un token JWT."""
-        ...
-
-    def get_user_from_token(self, token: str) -> dict:
-        """Décode le token JWT et retourne les informations de l'utilisateur."""
-        ...
