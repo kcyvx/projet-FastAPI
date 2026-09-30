@@ -1,14 +1,13 @@
 from typing import Optional, List
 from account.account import Account
 from user.user import User, UserCreate, hash_password
-from transaction.transaction import Transaction, debit, credit
+from transaction.transaction import Transaction, TransferStatus, debit, credit
 
 class FakeAccountRepository:
     def __init__(self):
-        # Base en mémoire initialisée avec Alice et Bob
         self.accounts: dict[int, Account] = {
-            1: Account(id=1, name="Alice", solde=100.0),
-            2: Account(id=2, name="Bob", solde=100.0),
+            1: Account(id=1, name="Alice", solde=100.0, user_id=1, is_main=True),
+            2: Account(id=2, name="Bob", solde=100.0, user_id=2, is_main=True),
         }
         self.transactions: list[Transaction] = []
 
@@ -20,7 +19,6 @@ class FakeAccountRepository:
 
     def get_by_user_id(self, user_id: int) -> List[Account]:
         return [acc for acc in self.accounts.values() if acc.user_id == user_id]
-
 
     def create(self, name: str, user_id: int, solde: float = 0.0, is_main: bool = False) -> Account:
         new_id = max(self.accounts.keys(), default=0) + 1
@@ -40,37 +38,68 @@ class FakeAccountRepository:
             raise KeyError("Compte introuvable.")
 
         credit(account, montant)
-
         tx = Transaction(
             id=len(self.transactions) + 1,
-            source_id=None,
             destinataire_id=account_id,
             montant=montant,
             type="DEPOT",
-            statut="approved"
+            statut=TransferStatus.APPROVED.value
         )
         self.transactions.append(tx)
         return account, tx
 
-    def transfer(self, source_id: int, destinataire_id: int, montant: float) -> tuple[Account, Account, Transaction]:
-        source = self.get_by_id(source_id)
-        destinataire = self.get_by_id(destinataire_id)
-        if not source or not destinataire:
-            raise KeyError("Compte introuvable.")
-
-        debit(source, montant)
-        credit(destinataire, montant)
-
+    def create_pending_transfer(self, source_id: int, destinataire_id: int, montant: float) -> Transaction:
+        new_id = max((t.id for t in self.transactions if t.id is not None), default=0) + 1
         tx = Transaction(
-            id=len(self.transactions) + 1,
+            id=new_id,
             source_id=source_id,
             destinataire_id=destinataire_id,
             montant=montant,
             type="VIREMENT",
-            statut="approved"
+            statut=TransferStatus.PENDING.value
         )
         self.transactions.append(tx)
-        return source, destinataire, tx
+        return tx
+
+    def get_transaction_by_id(self, transaction_id: int) -> Optional[Transaction]:
+        return next((t for t in self.transactions if t.id == transaction_id), None)
+
+    def get_pending_transactions(self) -> List[Transaction]:
+        return [t for t in self.transactions if t.statut == TransferStatus.PENDING.value]
+
+    def get_pending_amount_by_source(self, source_id: int) -> float:
+        return round(
+            sum(
+                t.montant for t in self.transactions
+                if t.source_id == source_id and t.statut == TransferStatus.PENDING.value
+            ),
+            2
+        )
+
+    def cancel_transaction(self, transaction_id: int) -> Optional[Transaction]:
+        tx = self.get_transaction_by_id(transaction_id)
+        if tx:
+            tx.statut = TransferStatus.CANCELLED.value
+        return tx
+
+    def finalize_transfer(self, transaction_id: int) -> tuple[Account, Account, Transaction]:
+        tx = self.get_transaction_by_id(transaction_id)
+        if not tx:
+            raise KeyError("Transaction introuvable.")
+
+        source = self.get_by_id(tx.source_id)
+        destinataire = self.get_by_id(tx.destinataire_id)
+        if not source or not destinataire:
+            raise KeyError("Compte introuvable.")
+
+        try:
+            debit(source, tx.montant)
+            credit(destinataire, tx.montant)
+            tx.statut = TransferStatus.APPROVED.value
+            return source, destinataire, tx
+        except Exception:
+            tx.statut = TransferStatus.REJECTED.value
+            raise
 
 class FakeUserRepository:
     def __init__(self):

@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional, Any
 from enum import Enum
-from pydantic import BaseModel, Field as PydanticField, model_validator
+from pydantic import BaseModel, Field as PydanticField
 from sqlmodel import SQLModel, Field
 
 class TransferStatus(str, Enum):
@@ -22,49 +22,13 @@ class Transaction(SQLModel, table=True):
         nullable=False
     )
 
-PENDING_TRANSFERS: dict[int, Transaction] = {}
-
 class DepositRequest(BaseModel):
     montant: float = PydanticField(..., gt=0, description="Le montant doit être strictement supérieur à 0.")
 
 class TransferRequest(BaseModel):
-    source_id: Optional[int] = None
-    destinataire_id: Optional[int] = None
-    montant: Optional[float] = PydanticField(default=None, gt=0, description="Le montant doit être strictement supérieur à 0.")
-    source_account: Optional[Any] = None
-    target_account: Optional[Any] = None
-    amount: Optional[float] = PydanticField(default=None, gt=0, description="Montant strictement positif")
-
-    @model_validator(mode="before")
-    @classmethod
-    def unify_fields(cls, values: Any) -> Any:
-        if isinstance(values, dict):
-            # Normalisation source_account -> source_id
-            if "source_id" not in values and "source_account" in values:
-                try:
-                    values["source_id"] = int(values["source_account"])
-                except (ValueError, TypeError):
-                    values["source_id"] = values["source_account"]
-            # Normalisation target_account -> destinataire_id
-            if "destinataire_id" not in values and "target_account" in values:
-                try:
-                    values["destinataire_id"] = int(values["target_account"])
-                except (ValueError, TypeError):
-                    values["destinataire_id"] = values["target_account"]
-            # Normalisation amount -> montant
-            if "montant" not in values and "amount" in values:
-                values["montant"] = values["amount"]
-        return values
-
-    @model_validator(mode="after")
-    def validate_required_fields(self):
-        if self.source_id is None:
-            raise ValueError("Le champ source_id est obligatoire.")
-        if self.destinataire_id is None:
-            raise ValueError("Le champ destinataire_id est obligatoire.")
-        if self.montant is None or self.montant <= 0:
-            raise ValueError("Le montant doit être strictement supérieur à 0.")
-        return self
+    source_id: int
+    destinataire_id: int
+    montant: float = PydanticField(..., gt=0, description="Le montant doit être strictement supérieur à 0.")
 
 class InsufficientBalanceError(Exception):
     """Exception levée en cas de solde insuffisant."""
@@ -75,27 +39,17 @@ class InvalidAmountError(Exception):
     pass
 
 def credit(account: Any, amount: float) -> float:
-    """Ajoute de l'argent au compte (compatible objet SQLModel et dict)."""
+    """Ajoute de l'argent au compte."""
     if amount <= 0:
         raise InvalidAmountError("Le montant doit être strictement positif.")
-    val = getattr(account, "solde", None) if not isinstance(account, dict) else account.get("solde")
-    new_val = round(val + amount, 2)
-    if isinstance(account, dict):
-        account["solde"] = new_val
-    else:
-        account.solde = new_val
-    return new_val
+    account.solde = round(account.solde + amount, 2)
+    return account.solde
 
 def debit(account: Any, amount: float) -> float:
-    """Retire de l'argent du compte après vérification du solde (compatible objet SQLModel et dict)."""
+    """Retire de l'argent du compte après vérification du solde."""
     if amount <= 0:
         raise InvalidAmountError("Le montant doit être strictement positif.")
-    val = getattr(account, "solde", None) if not isinstance(account, dict) else account.get("solde")
-    if val < amount:
-        raise InsufficientBalanceError(f"Solde insuffisant ({val:.2f} € disponibles, {amount:.2f} € requis).")
-    new_val = round(val - amount, 2)
-    if isinstance(account, dict):
-        account["solde"] = new_val
-    else:
-        account.solde = new_val
-    return new_val
+    if account.solde < amount:
+        raise InsufficientBalanceError(f"Solde insuffisant ({account.solde:.2f} € disponibles, {amount:.2f} € requis).")
+    account.solde = round(account.solde - amount, 2)
+    return account.solde

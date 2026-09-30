@@ -11,20 +11,11 @@ from transaction.transaction import (
     InsufficientBalanceError,
     DepositRequest,
     TransferRequest,
-    TransferStatus,
-    PENDING_TRANSFERS
+    TransferStatus
 )
 from repositories.interfaces import AccountRepository, UserRepository
 from dependencies import get_account_repo, get_user_repo, get_current_user, is_use_sql
 from db.db import seed_initial_data
-
-_pending_counter = 1
-
-def _get_next_pending_id() -> int:
-    global _pending_counter
-    pid = _pending_counter
-    _pending_counter += 1
-    return pid
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -87,12 +78,12 @@ def liste_comptes(
 
 
 @app.get("/transactions/pending")
-def transactions_en_cours(current_user: dict = Depends(get_current_user)):
-    """Consulte les transactions actuellement en cours de traitement / flottement."""
-    return [
-        tx for tx in PENDING_TRANSFERS.values()
-        if getattr(tx, "statut", None) == TransferStatus.PENDING.value
-    ]
+def transactions_en_cours(
+    current_user: dict = Depends(get_current_user),
+    account_repo: AccountRepository = Depends(get_account_repo)
+):
+    """Consulte les transactions actuellement en cours de traitement / flottement enregistrées en base."""
+    return account_repo.get_pending_transactions()
 
 
 @app.post("/transactions/{transaction_id}/cancel")
@@ -101,8 +92,8 @@ def annuler_transaction(
     current_user: dict = Depends(get_current_user),
     account_repo: AccountRepository = Depends(get_account_repo)
 ):
-    """Annule une transaction en cours pendant son délai de flottement."""
-    tx = PENDING_TRANSFERS.get(transaction_id)
+    """Annule une transaction en cours pendant son délai de flottement directement en base de données."""
+    tx = account_repo.get_transaction_by_id(transaction_id)
     if not tx:
         raise HTTPException(status_code=404, detail="Transaction introuvable.")
 
@@ -113,7 +104,7 @@ def annuler_transaction(
     if tx.statut != TransferStatus.PENDING.value:
         raise HTTPException(status_code=400, detail="Une transaction confirmée ou déjà traitée ne peut pas être annulée.")
 
-    tx.statut = TransferStatus.CANCELLED.value
+    account_repo.cancel_transaction(transaction_id)
     return {
         "status": "cancelled",
         "message": "La transaction a été annulée avec succès.",
@@ -142,11 +133,8 @@ async def Faire_un_transfert(
             detail="Action non autorisée : vous ne pouvez initier un virement que depuis vos propres comptes."
         )
 
-    # Vérification du solde disponible en tenant compte des transactions encore en flottement
-    pending_amount = sum(
-        t.montant for t in PENDING_TRANSFERS.values()
-        if t.source_id == transfert.source_id and getattr(t, "statut", None) == TransferStatus.PENDING.value
-    )
+    # Vérification du solde disponible en tenant compte des transactions encore en attente en base
+    pending_amount = account_repo.get_pending_amount_by_source(transfert.source_id)
     solde_disponible = source.solde - pending_amount
     if solde_disponible < transfert.montant:
         raise HTTPException(
@@ -154,44 +142,29 @@ async def Faire_un_transfert(
             detail=f"Solde insuffisant ({solde_disponible:.2f} € disponibles, {transfert.montant:.2f} € requis)."
         )
 
-    # 1. Mise dans le dictionnaire des transactions en cours avec statut PENDING
-    pending_id = _get_next_pending_id()
-    pending_tx = Transaction(
-        id=pending_id,
+    # 1. Enregistrement direct de la transaction avec statut PENDING dans la base de données
+    pending_tx = account_repo.create_pending_transfer(
         source_id=transfert.source_id,
         destinataire_id=transfert.destinataire_id,
-        montant=transfert.montant,
-        type="VIREMENT",
-        statut=TransferStatus.PENDING.value,
-        created_at=datetime.now(timezone.utc)
+        montant=transfert.montant
     )
-    PENDING_TRANSFERS[pending_id] = pending_tx
+    pending_id = pending_tx.id
 
-    # 2. Moment de flottement de 5 secondes (défaut 5s, ajustable par env pour tests rapides)
+    # 2. Moment de flottement (délai de 5s par défaut, configurable via TRANSFER_DELAY_SECONDS)
     delay = float(os.getenv("TRANSFER_DELAY_SECONDS", "5.0"))
     if delay > 0:
         await asyncio.sleep(delay)
 
-    # 3. Vérification si la transaction a été annulée durant le moment de flottement
-    current_tx = PENDING_TRANSFERS.get(pending_id)
+    # 3. Vérification de l'état de la transaction en base après le moment de flottement
+    current_tx = account_repo.get_transaction_by_id(pending_id)
     if not current_tx or current_tx.statut in (TransferStatus.REJECTED.value, TransferStatus.CANCELLED.value):
         raise HTTPException(status_code=400, detail="La transaction a été annulée durant le délai de rétractation.")
 
-    # 4. Validation et envoi en base de données après le flottement
+    # 4. Validation et finalisation du virement en base de données
     try:
-        source, destinataire, tx = account_repo.transfer(
-            transfert.source_id,
-            transfert.destinataire_id,
-            transfert.montant
-        )
+        source, destinataire, tx = account_repo.finalize_transfer(pending_id)
     except (InvalidAmountError, InsufficientBalanceError) as e:
-        if pending_id in PENDING_TRANSFERS:
-            PENDING_TRANSFERS[pending_id].statut = TransferStatus.REJECTED.value
         raise HTTPException(status_code=400, detail=str(e))
-
-    # Mise à jour dans le dictionnaire avec la transaction finale validée
-    PENDING_TRANSFERS[pending_id] = tx
-    PENDING_TRANSFERS[pending_id].statut = TransferStatus.APPROVED.value
 
     summary = f"Transfert de {transfert.montant}€ de {source.name} (ID: {transfert.source_id}) vers {destinataire.name} (ID: {transfert.destinataire_id})"
     return {
