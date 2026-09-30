@@ -380,5 +380,61 @@ class TestFastAPIBankingAPI(unittest.TestCase):
             self.assertEqual(user_accounts[0]["solde"], 100.0)
             self.assertTrue(user_accounts[0]["is_main"])
 
+    def test_story_13_transaction_detail(self):
+        """Vérifie la Story 13 : consultation des détails d'une transaction."""
+        import time
+        os.environ["USE_SQL"] = "false"
+        os.environ["TRANSFER_DELAY_SECONDS"] = "0"
+
+        with TestClient(app) as client:
+            ts = int(time.time() * 1000)
+            # Utilisateur 1 (émetteur)
+            u1_email = f"u1_s13_{ts}@test.com"
+            client.post("/register", json={"email": u1_email, "password": "Password123!"})
+            t1 = client.post("/login", json={"email": u1_email, "password": "Password123!"}).json()["access_token"]
+            h1 = {"Authorization": f"Bearer {t1}"}
+            acc1_id = client.get("/accounts", headers=h1).json()[0]["id"]
+
+            # Utilisateur 2 (destinataire)
+            u2_email = f"u2_s13_{ts}@test.com"
+            client.post("/register", json={"email": u2_email, "password": "Password123!"})
+            t2 = client.post("/login", json={"email": u2_email, "password": "Password123!"}).json()["access_token"]
+            h2 = {"Authorization": f"Bearer {t2}"}
+            acc2_id = client.get("/accounts", headers=h2).json()[0]["id"]
+
+            # Utilisateur 3 (tiers)
+            u3_email = f"u3_s13_{ts}@test.com"
+            client.post("/register", json={"email": u3_email, "password": "Password123!"})
+            t3 = client.post("/login", json={"email": u3_email, "password": "Password123!"}).json()["access_token"]
+            h3 = {"Authorization": f"Bearer {t3}"}
+
+            # Effectuer un virement de U1 vers U2
+            res_transfer = client.post("/transactions", json={"source_id": acc1_id, "destinataire_id": acc2_id, "montant": 25.0}, headers=h1)
+            self.assertEqual(res_transfer.status_code, 200)
+            tx_id = res_transfer.json()["transaction_id"]
+
+            # 1. Émetteur (U1) peut consulter le détail
+            res_detail_u1 = client.get(f"/transactions/{tx_id}", headers=h1)
+            self.assertEqual(res_detail_u1.status_code, 200)
+            self.assertEqual(res_detail_u1.json()["id"], tx_id)
+            self.assertEqual(res_detail_u1.json()["montant"], 25.0)
+
+            # 2. Destinataire (U2) peut aussi consulter le détail
+            res_detail_u2 = client.get(f"/transactions/{tx_id}", headers=h2)
+            self.assertEqual(res_detail_u2.status_code, 200)
+            self.assertEqual(res_detail_u2.json()["id"], tx_id)
+
+            # 3. Tiers non autorisé (U3) reçoit 403
+            res_detail_u3 = client.get(f"/transactions/{tx_id}", headers=h3)
+            self.assertEqual(res_detail_u3.status_code, 403)
+
+            # 4. Transaction inexistante reçoit 404
+            res_not_found = client.get("/transactions/999999", headers=h1)
+            self.assertEqual(res_not_found.status_code, 404)
+
+            # 5. Non authentifié reçoit 401
+            res_no_auth = client.get(f"/transactions/{tx_id}")
+            self.assertEqual(res_no_auth.status_code, 401)
+
 if __name__ == "__main__":
     unittest.main()

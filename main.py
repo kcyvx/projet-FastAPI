@@ -111,6 +111,32 @@ def annuler_transaction(
     }
 
 
+@app.get("/transactions/{transaction_id}")
+def detail_transaction(
+    transaction_id: int,
+    current_user: dict = Depends(get_current_user),
+    account_repo: AccountRepository = Depends(get_account_repo)
+):
+    """Consulte le détail d'une transaction (Story 13)."""
+    tx = account_repo.get_transaction_by_id(transaction_id)
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction introuvable.")
+
+    source = account_repo.get_by_id(tx.source_id) if tx.source_id else None
+    destinataire = account_repo.get_by_id(tx.destinataire_id) if tx.destinataire_id else None
+
+    is_sender = source and source.user_id == current_user["id"]
+    is_receiver = destinataire and destinataire.user_id == current_user["id"]
+
+    if not (is_sender or is_receiver):
+        raise HTTPException(
+            status_code=403,
+            detail="Action non autorisée : vous devez être l'expéditeur ou le destinataire de cette transaction."
+        )
+
+    return tx
+
+
 @app.post("/transactions")
 async def Faire_un_transfert(
     transfert: TransferRequest,
