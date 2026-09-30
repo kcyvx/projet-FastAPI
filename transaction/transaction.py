@@ -1,7 +1,14 @@
 from datetime import datetime, timezone
 from typing import Optional, Any
-from pydantic import BaseModel, Field as PydanticField
+from enum import Enum
+from pydantic import BaseModel, Field as PydanticField, model_validator
 from sqlmodel import SQLModel, Field
+
+class TransferStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
 
 class Transaction(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -9,19 +16,55 @@ class Transaction(SQLModel, table=True):
     destinataire_id: int = Field(index=True)
     montant: float
     type: str = Field(default="DEPOT")
+    statut: str = Field(default=TransferStatus.PENDING.value)
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         nullable=False
     )
 
+PENDING_TRANSFERS: dict[int, Transaction] = {}
 
 class DepositRequest(BaseModel):
     montant: float = PydanticField(..., gt=0, description="Le montant doit être strictement supérieur à 0.")
 
 class TransferRequest(BaseModel):
-    source_id: int
-    destinataire_id: int
-    montant: float = PydanticField(..., gt=0, description="Le montant doit être strictement supérieur à 0.")
+    source_id: Optional[int] = None
+    destinataire_id: Optional[int] = None
+    montant: Optional[float] = PydanticField(default=None, gt=0, description="Le montant doit être strictement supérieur à 0.")
+    source_account: Optional[Any] = None
+    target_account: Optional[Any] = None
+    amount: Optional[float] = PydanticField(default=None, gt=0, description="Montant strictement positif")
+
+    @model_validator(mode="before")
+    @classmethod
+    def unify_fields(cls, values: Any) -> Any:
+        if isinstance(values, dict):
+            # Normalisation source_account -> source_id
+            if "source_id" not in values and "source_account" in values:
+                try:
+                    values["source_id"] = int(values["source_account"])
+                except (ValueError, TypeError):
+                    values["source_id"] = values["source_account"]
+            # Normalisation target_account -> destinataire_id
+            if "destinataire_id" not in values and "target_account" in values:
+                try:
+                    values["destinataire_id"] = int(values["target_account"])
+                except (ValueError, TypeError):
+                    values["destinataire_id"] = values["target_account"]
+            # Normalisation amount -> montant
+            if "montant" not in values and "amount" in values:
+                values["montant"] = values["amount"]
+        return values
+
+    @model_validator(mode="after")
+    def validate_required_fields(self):
+        if self.source_id is None:
+            raise ValueError("Le champ source_id est obligatoire.")
+        if self.destinataire_id is None:
+            raise ValueError("Le champ destinataire_id est obligatoire.")
+        if self.montant is None or self.montant <= 0:
+            raise ValueError("Le montant doit être strictement supérieur à 0.")
+        return self
 
 class InsufficientBalanceError(Exception):
     """Exception levée en cas de solde insuffisant."""

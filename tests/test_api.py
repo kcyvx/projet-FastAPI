@@ -10,12 +10,17 @@ class TestFastAPIBankingAPI(unittest.TestCase):
         # Réinitialise les repositories Fake pour garantir l'indépendance de chaque test
         dependencies._fake_account_repo = FakeAccountRepository()
         dependencies._fake_user_repo = FakeUserRepository()
+        from transaction.transaction import PENDING_TRANSFERS
+        PENDING_TRANSFERS.clear()
+        os.environ["TRANSFER_DELAY_SECONDS"] = "0"
 
     def _execute_full_suite(self, mode_name: str, use_sql: bool):
         os.environ["USE_SQL"] = "true" if use_sql else "false"
 
         with TestClient(app) as client:
-            prefix = f"{mode_name}_"
+            import time
+            ts = int(time.time() * 1000)
+            prefix = f"{mode_name}_{ts}_"
             user1_email = f"{prefix}alice@test.com"
             user2_email = f"{prefix}bob@test.com"
             pwd = "SecretPassword123!"
@@ -194,6 +199,70 @@ class TestFastAPIBankingAPI(unittest.TestCase):
             tx_zero = {"source_id": acc1_id, "destinataire_id": acc2_id, "montant": 0.0}
             res_tx_zero = client.post("/transactions", json=tx_zero, headers=headers1)
             self.assertEqual(res_tx_zero.status_code, 422)
+
+    def test_transaction_floating_window_and_pending_dict(self):
+        """Vérifie le stockage dans PENDING_TRANSFERS et la validation en DB après le délai."""
+        from transaction.transaction import PENDING_TRANSFERS, TransferStatus
+        import time
+
+        os.environ["USE_SQL"] = "false"
+        os.environ["TRANSFER_DELAY_SECONDS"] = "0.2"
+
+        with TestClient(app) as client:
+            ts = int(time.time() * 1000)
+            email = f"delay_{ts}@test.com"
+            client.post("/register", json={"email": email, "password": "Password123!"})
+            token = client.post("/login", json={"email": email, "password": "Password123!"}).json()["access_token"]
+            headers = {"Authorization": f"Bearer {token}"}
+
+            acc1 = client.post("/accounts", json={"name": "Compte A"}, headers=headers).json()["account"]
+            acc2 = client.post("/accounts", json={"name": "Compte B"}, headers=headers).json()["account"]
+            client.post(f"/accounts/{acc1['id']}/deposit", json={"montant": 100.0}, headers=headers)
+
+            res = client.post("/transactions", json={"source_id": acc1["id"], "destinataire_id": acc2["id"], "montant": 40.0}, headers=headers)
+            self.assertEqual(res.status_code, 200)
+            self.assertEqual(res.json()["sender_new_solde"], 60.0)
+
+            tx_id = res.json()["transaction_id"]
+            self.assertTrue(any(t.id == tx_id and t.statut == TransferStatus.APPROVED.value for t in PENDING_TRANSFERS.values()))
+
+    def test_transaction_cancel_during_floating_window(self):
+        """Vérifie l'annulation d'une transaction pendant le moment de flottement."""
+        import threading
+        import time
+        from transaction.transaction import PENDING_TRANSFERS, TransferStatus
+
+        os.environ["USE_SQL"] = "false"
+        os.environ["TRANSFER_DELAY_SECONDS"] = "1.0"
+
+        with TestClient(app) as client:
+            ts = int(time.time() * 1000)
+            email = f"cancel_{ts}@test.com"
+            client.post("/register", json={"email": email, "password": "Password123!"})
+            token = client.post("/login", json={"email": email, "password": "Password123!"}).json()["access_token"]
+            headers = {"Authorization": f"Bearer {token}"}
+
+            acc1 = client.post("/accounts", json={"name": "Compte Source"}, headers=headers).json()["account"]
+            acc2 = client.post("/accounts", json={"name": "Compte Dest"}, headers=headers).json()["account"]
+            client.post(f"/accounts/{acc1['id']}/deposit", json={"montant": 100.0}, headers=headers)
+
+            def cancel_worker():
+                time.sleep(0.2)
+                pending_txs = [t for t in PENDING_TRANSFERS.values() if t.statut == TransferStatus.PENDING.value]
+                if pending_txs:
+                    client.post(f"/transactions/{pending_txs[0].id}/cancel", headers=headers)
+
+            t = threading.Thread(target=cancel_worker)
+            t.start()
+
+            res = client.post("/transactions", json={"source_id": acc1["id"], "destinataire_id": acc2["id"], "montant": 50.0}, headers=headers)
+            t.join()
+
+            self.assertEqual(res.status_code, 400)
+            self.assertIn("annulée", res.json()["detail"])
+
+            info = client.get(f"/accounts/{acc1['id']}", headers=headers)
+            self.assertEqual(info.json()["solde"], 100.0)
 
     def test_all_routes_fake_mode(self):
         """Teste toutes les routes en mode mémoire (Fake repositories)."""

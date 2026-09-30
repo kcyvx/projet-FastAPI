@@ -45,7 +45,8 @@ class SqlAccountRepository:
                 source_id=None,
                 destinataire_id=account_id,
                 montant=montant,
-                type="DEPOT"
+                type="DEPOT",
+                statut="approved"
             )
             self.session.add(account)
             self.session.add(tx)
@@ -71,7 +72,8 @@ class SqlAccountRepository:
                 source_id=source_id,
                 destinataire_id=destinataire_id,
                 montant=montant,
-                type="VIREMENT"
+                type="VIREMENT",
+                statut="approved"
             )
             self.session.add(source)
             self.session.add(destinataire)
