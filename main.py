@@ -36,13 +36,29 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 @app.post("/register")
-def inscription(user: UserCreate, user_repo: UserRepository = Depends(get_user_repo)):
+def inscription(
+    user: UserCreate,
+    user_repo: UserRepository = Depends(get_user_repo),
+    account_repo: AccountRepository = Depends(get_account_repo)
+):
     try:
         new_user = user_repo.create(user)
+        main_account = account_repo.create(
+            name="Compte Principal",
+            user_id=new_user.id,
+            solde=100.0,
+            is_main=True
+        )
         return {
             "message": "Inscription réussie",
             "user_id": new_user.id,
-            "email": new_user.email
+            "email": new_user.email,
+            "account": {
+                "id": main_account.id,
+                "name": main_account.name,
+                "solde": main_account.solde,
+                "is_main": main_account.is_main
+            }
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

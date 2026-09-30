@@ -17,8 +17,8 @@ class AccountRepository(Protocol):
         ...
 
 
-    def create(self, name: str, user_id: int) -> Account:
-        """Crée un nouveau compte bancaire avec un solde initial de 0.0."""
+    def create(self, name: str, user_id: int, solde: float = 0.0, is_main: bool = False) -> Account:
+        """Crée un nouveau compte bancaire."""
         ...
 
     def deposit(self, account_id: int, montant: float) -> tuple[Account, Transaction]:

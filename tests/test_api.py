@@ -272,5 +272,28 @@ class TestFastAPIBankingAPI(unittest.TestCase):
         """Teste toutes les routes en mode base de données SQL (SQLite)."""
         self._execute_full_suite("sql", use_sql=True)
 
+    def test_story_11_automatic_main_account(self):
+        """Vérifie la Story 11 : création automatique d'un compte principal crédité de 100€ à l'inscription."""
+        import time
+        with TestClient(app) as client:
+            ts = int(time.time() * 1000)
+            email = f"story11_{ts}@test.com"
+            res = client.post("/register", json={"email": email, "password": "Password123!"})
+            self.assertEqual(res.status_code, 200)
+            data = res.json()
+            self.assertIn("account", data)
+            self.assertEqual(data["account"]["solde"], 100.0)
+            self.assertTrue(data["account"]["is_main"])
+
+            # Vérifie également via /login et /accounts
+            token = client.post("/login", json={"email": email, "password": "Password123!"}).json()["access_token"]
+            headers = {"Authorization": f"Bearer {token}"}
+            accounts_res = client.get("/accounts", headers=headers)
+            self.assertEqual(accounts_res.status_code, 200)
+            user_accounts = accounts_res.json()
+            self.assertEqual(len(user_accounts), 1)
+            self.assertEqual(user_accounts[0]["solde"], 100.0)
+            self.assertTrue(user_accounts[0]["is_main"])
+
 if __name__ == "__main__":
     unittest.main()

@@ -18,12 +18,12 @@ class SqlAccountRepository:
         return self.session.exec(select(Account).where(Account.user_id == user_id)).all()
 
 
-    # --- NOUVELLE MÉTHODE US 4 ---
-    def create(self, name: str, user_id: int) -> Account:
+    def create(self, name: str, user_id: int, solde: float = 0.0, is_main: bool = False) -> Account:
         new_account = Account(
             name=name,
             user_id=user_id,
-            solde=0.0          # Règle Story 4 : solde à 0€ obligatoire
+            solde=solde,
+            is_main=is_main
         )
         try:
             self.session.add(new_account)

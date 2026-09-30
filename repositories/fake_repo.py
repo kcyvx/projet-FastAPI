@@ -22,14 +22,14 @@ class FakeAccountRepository:
         return [acc for acc in self.accounts.values() if acc.user_id == user_id]
 
 
-    # --- NOUVELLE MÉTHODE US 4 ---
-    def create(self, name: str, user_id: int) -> Account:
+    def create(self, name: str, user_id: int, solde: float = 0.0, is_main: bool = False) -> Account:
         new_id = max(self.accounts.keys(), default=0) + 1
         new_account = Account(
             id=new_id,
             name=name,
-            solde=0.0,
-            user_id=user_id
+            solde=solde,
+            user_id=user_id,
+            is_main=is_main
         )
         self.accounts[new_id] = new_account
         return new_account
