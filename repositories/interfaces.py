@@ -16,6 +16,14 @@ class AccountRepository(Protocol):
         """Récupère tous les comptes d'un utilisateur."""
         ...
 
+    def get_main_account(self, user_id: int) -> Optional[Account]:
+        """Récupère le compte principal d'un utilisateur."""
+        ...
+
+    def close_account(self, account_id: str) -> tuple[Account, Account, Optional[Transaction]]:
+        """Clôture un compte et transfère son solde vers le compte principal."""
+        ...
+
     def create(self, name: str, user_id: int, solde: float = 0.0, is_main: bool = False) -> Account:
         """Crée un nouveau compte bancaire."""
         ...

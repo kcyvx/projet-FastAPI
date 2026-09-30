@@ -436,5 +436,63 @@ class TestFastAPIBankingAPI(unittest.TestCase):
             res_no_auth = client.get(f"/transactions/{tx_id}")
             self.assertEqual(res_no_auth.status_code, 401)
 
+    def test_story_12_close_account(self):
+        """Vérifie la Story 12 : clôture d'un compte avec transfert du solde sur le compte principal."""
+        import time
+        os.environ["USE_SQL"] = "false"
+        os.environ["TRANSFER_DELAY_SECONDS"] = "0"
+
+        with TestClient(app) as client:
+            ts = int(time.time() * 1000)
+            u_email = f"close_{ts}@test.com"
+            client.post("/register", json={"email": u_email, "password": "Password123!"})
+            token = client.post("/login", json={"email": u_email, "password": "Password123!"}).json()["access_token"]
+            headers = {"Authorization": f"Bearer {token}"}
+
+            # Récupération du compte principal (solde initial 100€)
+            accounts = client.get("/accounts", headers=headers).json()
+            main_acc = next(a for a in accounts if a["is_main"])
+            self.assertEqual(main_acc["solde"], 100.0)
+
+            # Ouverture d'un compte secondaire (solde initial 0€)
+            sec_acc = client.post("/accounts", json={"name": "Compte Épargne"}, headers=headers).json()["account"]
+            self.assertEqual(sec_acc["solde"], 0.0)
+            self.assertFalse(sec_acc["is_main"])
+
+            # Dépôt de 50€ sur le compte secondaire
+            client.post(f"/accounts/{sec_acc['id']}/deposit", json={"montant": 50.0}, headers=headers)
+            sec_info = client.get(f"/accounts/{sec_acc['id']}", headers=headers).json()
+            self.assertEqual(sec_info["solde"], 50.0)
+
+            # Règle : Le compte principal ne peut pas être clôturé (400)
+            res_close_main = client.post(f"/accounts/{main_acc['id']}/close", headers=headers)
+            self.assertEqual(res_close_main.status_code, 400)
+            self.assertIn("principal", res_close_main.json()["detail"])
+
+            # Clôture du compte secondaire
+            res_close = client.post(f"/accounts/{sec_acc['id']}/close", headers=headers)
+            self.assertEqual(res_close.status_code, 200)
+            self.assertEqual(res_close.json()["transferred_amount"], 50.0)
+            self.assertEqual(res_close.json()["main_account_new_solde"], 150.0)
+            self.assertTrue(res_close.json()["is_closed"])
+
+            # Règle : Un compte clôturé ne peut plus être consulté via /accounts (il disparaît de la liste)
+            accounts_after = client.get("/accounts", headers=headers).json()
+            account_ids_after = [a["id"] for a in accounts_after]
+            self.assertNotIn(sec_acc["id"], account_ids_after)
+            self.assertIn(main_acc["id"], account_ids_after)
+
+            # Règle : Un compte clôturé ne peut plus être consulté individuellement (404)
+            res_get_closed = client.get(f"/accounts/{sec_acc['id']}", headers=headers)
+            self.assertEqual(res_get_closed.status_code, 404)
+
+            # Règle : Impossible de déposer sur un compte clôturé (400)
+            res_dep_closed = client.post(f"/accounts/{sec_acc['id']}/deposit", json={"montant": 10.0}, headers=headers)
+            self.assertEqual(res_dep_closed.status_code, 400)
+
+            # Règle : Impossible de faire un virement depuis un compte clôturé (400)
+            res_tx_closed = client.post("/transactions", json={"source_id": sec_acc["id"], "destinataire_id": main_acc["id"], "montant": 10.0}, headers=headers)
+            self.assertEqual(res_tx_closed.status_code, 400)
+
 if __name__ == "__main__":
     unittest.main()

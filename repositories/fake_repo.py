@@ -21,7 +21,37 @@ class FakeAccountRepository:
         return list(self.accounts.values())
 
     def get_by_user_id(self, user_id: int) -> List[Account]:
-        return [acc for acc in self.accounts.values() if acc.user_id == user_id]
+        return [acc for acc in self.accounts.values() if acc.user_id == user_id and not getattr(acc, "is_closed", False)]
+
+    def get_main_account(self, user_id: int) -> Optional[Account]:
+        return next((acc for acc in self.accounts.values() if acc.user_id == user_id and acc.is_main and not getattr(acc, "is_closed", False)), None)
+
+    def close_account(self, account_id: str) -> tuple[Account, Account, Optional[Transaction]]:
+        account = self.get_by_id(account_id)
+        if not account:
+            raise KeyError("Compte introuvable.")
+
+        main_account = self.get_main_account(account.user_id)
+        if not main_account:
+            raise ValueError("Compte principal introuvable pour cet utilisateur.")
+
+        solde_to_transfer = account.solde
+        tx = None
+        if solde_to_transfer > 0:
+            credit(main_account, solde_to_transfer)
+            account.solde = 0.0
+            tx = Transaction(
+                id=len(self.transactions) + 1,
+                source_id=account.id,
+                destinataire_id=main_account.id,
+                montant=solde_to_transfer,
+                type="CLOTURE",
+                statut=TransferStatus.APPROVED.value
+            )
+            self.transactions.append(tx)
+
+        account.is_closed = True
+        return account, main_account, tx
 
     def get_transactions_by_account_id(self, account_id: str) -> List[Transaction]:
         txs = [

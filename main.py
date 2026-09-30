@@ -152,6 +152,12 @@ async def Faire_un_transfert(
     if not source or not destinataire:
         raise HTTPException(status_code=404, detail="Compte introuvable.")
 
+    if getattr(source, "is_closed", False):
+        raise HTTPException(status_code=400, detail="Le compte source est clôturé et ne peut plus être utilisé.")
+
+    if getattr(destinataire, "is_closed", False):
+        raise HTTPException(status_code=400, detail="Le compte destinataire est clôturé et ne peut plus être utilisé.")
+
     if source.user_id != current_user["id"]:
         raise HTTPException(
             status_code=403,
@@ -222,6 +228,8 @@ def get_account_info(
     account = account_repo.get_by_id(account_id)
     if not account:
         raise HTTPException(status_code=404, detail="Compte introuvable.")
+    if getattr(account, "is_closed", False):
+        raise HTTPException(status_code=404, detail="Ce compte est clôturé et ne peut plus être consulté.")
     return AccountInfo(account, user["id"])
 
 
@@ -235,6 +243,9 @@ def deposer_argent(
     account = account_repo.get_by_id(account_id)
     if not account:
         raise HTTPException(status_code=404, detail="Compte introuvable.")
+
+    if getattr(account, "is_closed", False):
+        raise HTTPException(status_code=400, detail="Impossible de déposer de l'argent sur un compte clôturé.")
 
     if account.user_id != user["id"]:
         raise HTTPException(
@@ -264,6 +275,8 @@ def voir_transactions_compte(
     account = account_repo.get_by_id(account_id)
     if not account:
         raise HTTPException(status_code=404, detail="Compte introuvable.")
+    if getattr(account, "is_closed", False):
+        raise HTTPException(status_code=404, detail="Ce compte est clôturé et ne peut plus être consulté.")
     if account.user_id != user["id"]:
         raise HTTPException(
             status_code=403,
@@ -271,3 +284,48 @@ def voir_transactions_compte(
         )
 
     return account_repo.get_transactions_by_account_id(account_id)
+
+
+@app.post("/accounts/{account_id}/close")
+@app.delete("/accounts/{account_id}")
+def cloturer_compte(
+    account_id: str,
+    current_user: dict = Depends(get_current_user),
+    account_repo: AccountRepository = Depends(get_account_repo)
+):
+    """Clôture un compte bancaire et transfère son solde vers le compte principal (Story 12)."""
+    account = account_repo.get_by_id(account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="Compte introuvable.")
+
+    if account.user_id != current_user["id"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Action non autorisée : vous ne pouvez clôturer que vos propres comptes."
+        )
+
+    if getattr(account, "is_closed", False):
+        raise HTTPException(status_code=400, detail="Ce compte est déjà clôturé.")
+
+    if getattr(account, "is_main", False):
+        raise HTTPException(status_code=400, detail="Le compte principal ne peut pas être clôturé.")
+
+    pending_txs = [
+        t for t in account_repo.get_pending_transactions()
+        if (t.source_id == account_id or t.destinataire_id == account_id)
+        and getattr(t, "statut", None) == TransferStatus.PENDING.value
+    ]
+    if pending_txs:
+        raise HTTPException(
+            status_code=400,
+            detail="Le compte ne peut pas être clôturé s'il y a des transactions en cours."
+        )
+
+    closed_account, main_account, tx = account_repo.close_account(account_id)
+    return {
+        "message": "Le compte a été clôturé avec succès.",
+        "account_id": closed_account.id,
+        "is_closed": closed_account.is_closed,
+        "transferred_amount": tx.montant if tx else 0.0,
+        "main_account_new_solde": main_account.solde
+    }

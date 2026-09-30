@@ -15,7 +15,52 @@ class SqlAccountRepository:
         return list(self.session.exec(select(Account)).all())
 
     def get_by_user_id(self, user_id: int) -> List[Account]:
-        return list(self.session.exec(select(Account).where(Account.user_id == user_id)).all())
+        return list(self.session.exec(select(Account).where(Account.user_id == user_id, Account.is_closed == False)).all())
+
+    def get_main_account(self, user_id: int) -> Optional[Account]:
+        statement = select(Account).where(
+            Account.user_id == user_id,
+            Account.is_main == True,
+            Account.is_closed == False
+        )
+        return self.session.exec(statement).first()
+
+    def close_account(self, account_id: str) -> tuple[Account, Account, Optional[Transaction]]:
+        account = self.get_by_id(account_id)
+        if not account:
+            raise KeyError("Compte introuvable.")
+
+        main_account = self.get_main_account(account.user_id)
+        if not main_account:
+            raise ValueError("Compte principal introuvable pour cet utilisateur.")
+
+        solde_to_transfer = account.solde
+        tx = None
+        if solde_to_transfer > 0:
+            credit(main_account, solde_to_transfer)
+            account.solde = 0.0
+            tx = Transaction(
+                source_id=account.id,
+                destinataire_id=main_account.id,
+                montant=solde_to_transfer,
+                type="CLOTURE",
+                statut=TransferStatus.APPROVED.value
+            )
+            self.session.add(tx)
+
+        account.is_closed = True
+        try:
+            self.session.add(account)
+            self.session.add(main_account)
+            self.session.commit()
+            self.session.refresh(account)
+            self.session.refresh(main_account)
+            if tx:
+                self.session.refresh(tx)
+            return account, main_account, tx
+        except Exception:
+            self.session.rollback()
+            raise
 
     def get_transactions_by_account_id(self, account_id: str) -> List[Transaction]:
         statement = (
