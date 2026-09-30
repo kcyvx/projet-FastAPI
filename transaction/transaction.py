@@ -12,8 +12,8 @@ class TransferStatus(str, Enum):
 
 class Transaction(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    source_id: Optional[int] = Field(default=None, nullable=True)
-    destinataire_id: int = Field(index=True)
+    source_id: Optional[str] = Field(default=None, nullable=True)
+    destinataire_id: str = Field(index=True)
     montant: float
     type: str = Field(default="DEPOT")
     statut: str = Field(default=TransferStatus.PENDING.value)
@@ -26,8 +26,8 @@ class DepositRequest(BaseModel):
     montant: float = PydanticField(..., gt=0, description="Le montant doit être strictement supérieur à 0.")
 
 class TransferRequest(BaseModel):
-    source_id: Optional[int] = None
-    destinataire_id: Optional[int] = None
+    source_id: Optional[str] = None
+    destinataire_id: Optional[str] = None
     montant: Optional[float] = PydanticField(default=None, gt=0, description="Le montant doit être strictement supérieur à 0.")
     source_account: Optional[Any] = None
     target_account: Optional[Any] = None
@@ -37,18 +37,19 @@ class TransferRequest(BaseModel):
     @classmethod
     def unify_fields(cls, values: Any) -> Any:
         if isinstance(values, dict):
+            # Normalisation des alias
             if "source_id" not in values and "source_account" in values:
-                try:
-                    values["source_id"] = int(values["source_account"])
-                except (ValueError, TypeError):
-                    values["source_id"] = values["source_account"]
+                values["source_id"] = values["source_account"]
             if "destinataire_id" not in values and "target_account" in values:
-                try:
-                    values["destinataire_id"] = int(values["target_account"])
-                except (ValueError, TypeError):
-                    values["destinataire_id"] = values["target_account"]
+                values["destinataire_id"] = values["target_account"]
             if "montant" not in values and "amount" in values:
                 values["montant"] = values["amount"]
+
+            # Conversion en str si un entier est envoyé (ex: 999999)
+            if "source_id" in values and values["source_id"] is not None:
+                values["source_id"] = str(values["source_id"])
+            if "destinataire_id" in values and values["destinataire_id"] is not None:
+                values["destinataire_id"] = str(values["destinataire_id"])
         return values
 
     @model_validator(mode="after")

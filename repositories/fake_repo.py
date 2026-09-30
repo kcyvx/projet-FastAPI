@@ -1,3 +1,4 @@
+import uuid
 from typing import Optional, List
 from account.account import Account
 from user.user import User, UserCreate, hash_password
@@ -5,13 +6,15 @@ from transaction.transaction import Transaction, TransferStatus, debit, credit
 
 class FakeAccountRepository:
     def __init__(self):
-        self.accounts: dict[int, Account] = {
-            1: Account(id=1, name="Alice", solde=100.0, user_id=1, is_main=True),
-            2: Account(id=2, name="Bob", solde=100.0, user_id=2, is_main=True),
+        id_alice = str(uuid.uuid4())
+        id_bob = str(uuid.uuid4())
+        self.accounts: dict[str, Account] = {
+            id_alice: Account(id=id_alice, name="Alice", solde=100.0, user_id=1, is_main=True),
+            id_bob: Account(id=id_bob, name="Bob", solde=100.0, user_id=2, is_main=True),
         }
         self.transactions: list[Transaction] = []
 
-    def get_by_id(self, account_id: int) -> Optional[Account]:
+    def get_by_id(self, account_id: str ) -> Optional[Account]:
         return self.accounts.get(account_id)
 
     def get_all(self) -> List[Account]:
@@ -20,7 +23,7 @@ class FakeAccountRepository:
     def get_by_user_id(self, user_id: int) -> List[Account]:
         return [acc for acc in self.accounts.values() if acc.user_id == user_id]
 
-    def get_transactions_by_account_id(self, account_id: int) -> List[Transaction]:
+    def get_transactions_by_account_id(self, account_id: str) -> List[Transaction]:
         txs = [
             tx for tx in self.transactions
             if tx.source_id == account_id or tx.destinataire_id == account_id
@@ -28,7 +31,7 @@ class FakeAccountRepository:
         return sorted(txs, key=lambda t: t.created_at, reverse=True)
 
     def create(self, name: str, user_id: int, solde: float = 0.0, is_main: bool = False) -> Account:
-        new_id = max(self.accounts.keys(), default=0) + 1
+        new_id = str(uuid.uuid4())
         new_account = Account(
             id=new_id,
             name=name,
@@ -39,7 +42,7 @@ class FakeAccountRepository:
         self.accounts[new_id] = new_account
         return new_account
 
-    def deposit(self, account_id: int, montant: float) -> tuple[Account, Transaction]:
+    def deposit(self, account_id: str, montant: float) -> tuple[Account, Transaction]:
         account = self.get_by_id(account_id)
         if not account:
             raise KeyError("Compte introuvable.")
@@ -55,7 +58,7 @@ class FakeAccountRepository:
         self.transactions.append(tx)
         return account, tx
 
-    def create_pending_transfer(self, source_id: int, destinataire_id: int, montant: float) -> Transaction:
+    def create_pending_transfer(self, source_id: str, destinataire_id: str, montant: float) -> Transaction:
         new_id = max((t.id for t in self.transactions if t.id is not None), default=0) + 1
         tx = Transaction(
             id=new_id,
@@ -74,7 +77,7 @@ class FakeAccountRepository:
     def get_pending_transactions(self) -> List[Transaction]:
         return [t for t in self.transactions if t.statut == TransferStatus.PENDING.value]
 
-    def get_pending_amount_by_source(self, source_id: int) -> float:
+    def get_pending_amount_by_source(self, source_id: str) -> float:
         return round(
             sum(
                 t.montant for t in self.transactions

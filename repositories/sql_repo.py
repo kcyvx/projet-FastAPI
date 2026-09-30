@@ -8,7 +8,7 @@ class SqlAccountRepository:
     def __init__(self, session: Session):
         self.session = session
 
-    def get_by_id(self, account_id: int) -> Optional[Account]:
+    def get_by_id(self, account_id: str ) -> Optional[Account]:
         return self.session.get(Account, account_id)
 
     def get_all(self) -> List[Account]:
@@ -17,7 +17,7 @@ class SqlAccountRepository:
     def get_by_user_id(self, user_id: int) -> List[Account]:
         return list(self.session.exec(select(Account).where(Account.user_id == user_id)).all())
 
-    def get_transactions_by_account_id(self, account_id: int) -> List[Transaction]:
+    def get_transactions_by_account_id(self, account_id: str) -> List[Transaction]:
         statement = (
             select(Transaction)
             .where(or_(Transaction.source_id == account_id, Transaction.destinataire_id == account_id))
@@ -36,7 +36,7 @@ class SqlAccountRepository:
             self.session.rollback()
             raise
 
-    def deposit(self, account_id: int, montant: float) -> tuple[Account, Transaction]:
+    def deposit(self, account_id: str, montant: float) -> tuple[Account, Transaction]:
         account = self.get_by_id(account_id)
         if not account:
             raise KeyError("Compte introuvable.")
@@ -59,7 +59,7 @@ class SqlAccountRepository:
             self.session.rollback()
             raise
 
-    def create_pending_transfer(self, source_id: int, destinataire_id: int, montant: float) -> Transaction:
+    def create_pending_transfer(self, source_id: str, destinataire_id: str, montant: float) -> Transaction:
         tx = Transaction(
             source_id=source_id,
             destinataire_id=destinataire_id,
@@ -86,7 +86,7 @@ class SqlAccountRepository:
             select(Transaction).where(Transaction.statut == TransferStatus.PENDING.value)
         ).all())
 
-    def get_pending_amount_by_source(self, source_id: int) -> float:
+    def get_pending_amount_by_source(self, source_id: str) -> float:
         self.session.expire_all()
         pending_txs = self.session.exec(
             select(Transaction).where(

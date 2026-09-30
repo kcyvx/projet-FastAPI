@@ -4,7 +4,7 @@ from user.user import User, UserCreate
 from transaction.transaction import Transaction
 
 class AccountRepository(Protocol):
-    def get_by_id(self, account_id: int) -> Optional[Account]:
+    def get_by_id(self, account_id: str) -> Optional[Account]:
         """Récupère un compte par son identifiant."""
         ...
 
@@ -20,11 +20,11 @@ class AccountRepository(Protocol):
         """Crée un nouveau compte bancaire."""
         ...
 
-    def deposit(self, account_id: int, montant: float) -> tuple[Account, Transaction]:
+    def deposit(self, account_id: str, montant: float) -> tuple[Account, Transaction]:
         """Crédite un compte et enregistre la transaction de dépôt."""
         ...
 
-    def create_pending_transfer(self, source_id: int, destinataire_id: int, montant: float) -> Transaction:
+    def create_pending_transfer(self, source_id: str, destinataire_id: str, montant: float) -> Transaction:
         """Crée et enregistre en base une transaction avec le statut 'pending'."""
         ...
 
@@ -36,7 +36,7 @@ class AccountRepository(Protocol):
         """Récupère toutes les transactions actuellement en attente ('pending') en base."""
         ...
 
-    def get_pending_amount_by_source(self, source_id: int) -> float:
+    def get_pending_amount_by_source(self, source_id: str) -> float:
         """Calcule le montant total cumulé des transactions en attente pour un compte source."""
         ...
 
@@ -48,7 +48,7 @@ class AccountRepository(Protocol):
         """Valide et applique définitivement un virement en attente (débit, crédit, statut 'approved')."""
         ...
 
-    def get_transactions_by_account_id(self, account_id: int) -> List[Transaction]:
+    def get_transactions_by_account_id(self, account_id: str) -> List[Transaction]:
         """Récupère toutes les transactions d'un compte (débit ou crédit), triées par date décroissante."""
         ...
 

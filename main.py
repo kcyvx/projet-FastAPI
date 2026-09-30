@@ -132,7 +132,6 @@ async def Faire_un_transfert(
             detail="Action non autorisée : vous ne pouvez initier un virement que depuis vos propres comptes."
         )
 
-    # Vérification du solde disponible en tenant compte des transactions encore en attente en base
     pending_amount = account_repo.get_pending_amount_by_source(transfert.source_id)
     solde_disponible = source.solde - pending_amount
     if solde_disponible < transfert.montant:
@@ -141,7 +140,6 @@ async def Faire_un_transfert(
             detail=f"Solde insuffisant ({solde_disponible:.2f} € disponibles, {transfert.montant:.2f} € requis)."
         )
 
-    # 1. Enregistrement direct de la transaction avec statut PENDING dans la base de données
     pending_tx = account_repo.create_pending_transfer(
         source_id=transfert.source_id,
         destinataire_id=transfert.destinataire_id,
@@ -149,17 +147,14 @@ async def Faire_un_transfert(
     )
     pending_id = pending_tx.id
 
-    # 2. Moment de flottement (délai de 5s par défaut, configurable via TRANSFER_DELAY_SECONDS)
     delay = float(os.getenv("TRANSFER_DELAY_SECONDS", "5.0"))
     if delay > 0:
         await asyncio.sleep(delay)
 
-    # 3. Vérification de l'état de la transaction en base après le moment de flottement
     current_tx = account_repo.get_transaction_by_id(pending_id)
     if not current_tx or current_tx.statut in (TransferStatus.REJECTED.value, TransferStatus.CANCELLED.value):
         raise HTTPException(status_code=400, detail="La transaction a été annulée durant le délai de rétractation.")
 
-    # 4. Validation et finalisation du virement en base de données
     try:
         source, destinataire, tx = account_repo.finalize_transfer(pending_id)
     except (InvalidAmountError, InsufficientBalanceError) as e:
@@ -194,7 +189,7 @@ def ouvrir_compte(
 
 @app.get("/accounts/{account_id}")
 def get_account_info(
-    account_id: int,
+    account_id: str,
     account_repo: AccountRepository = Depends(get_account_repo),
     user: dict = Depends(get_current_user)
 ):
@@ -206,7 +201,7 @@ def get_account_info(
 
 @app.post("/accounts/{account_id}/deposit")
 def deposer_argent(
-    account_id: int,
+    account_id: str,
     payload: DepositRequest,
     user: dict = Depends(get_current_user),
     account_repo: AccountRepository = Depends(get_account_repo)
@@ -236,7 +231,7 @@ def deposer_argent(
 
 @app.get("/accounts/{account_id}/transactions")
 def voir_transactions_compte(
-    account_id: int,
+    account_id: str,
     user: dict = Depends(get_current_user),
     account_repo: AccountRepository = Depends(get_account_repo)
 ):
