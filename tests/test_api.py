@@ -494,5 +494,49 @@ class TestFastAPIBankingAPI(unittest.TestCase):
             res_tx_closed = client.post("/transactions", json={"source_id": sec_acc["id"], "destinataire_id": main_acc["id"], "montant": 10.0}, headers=headers)
             self.assertEqual(res_tx_closed.status_code, 400)
 
+    def test_story_14_add_beneficiary(self):
+        import time 
+        os.environ["USE_SQL"] = "false"
+        with TestClient(app) as client:
+            ts = int(time.time() * 1000)
+            u1_email = f"alice_b_{ts}@test.com"
+            client.post("/register", json={"email": u1_email, "password": "Password123!"})
+            t1 = client.post("/login", json={"email": u1_email, "password": "Password123!"}).json()["access_token"]
+            h1 = {"Authorization": f"Bearer {t1}"}
+            acc1_id = client.get("/accounts", headers=h1).json()[0]["id"]
+
+            u2_email = f"bob_b_{ts}@test.com"
+            client.post("/register", json={"email": u2_email, "password": "Password123!"})
+            t2 = client.post("/login", json={"email": u2_email, "password": "Password123!"}).json()["access_token"]
+            h2 = {"Authorization": f"Bearer {t2}"}
+            acc2_id = client.get("/accounts", headers=h2).json()[0]["id"]
+
+            # 1. Ajout valide
+            res_add = client.post("/beneficiaries", json={"account_id": acc2_id, "name": "Bob Ami"}, headers=h1)
+            self.assertEqual(res_add.status_code, 201)
+            self.assertEqual(res_add.json()["beneficiary"]["name"], "Bob Ami")
+
+            # 2. Interdiction d'ajouter son propre compte (400)
+            res_self = client.post("/beneficiaries", json={"account_id": acc1_id, "name": "Moi-meme"}, headers=h1)
+            self.assertEqual(res_self.status_code, 400)
+
+            # 3. Compte inexistant (404)
+            res_not_found = client.post("/beneficiaries", json={"account_id": "00000000-0000-0000-0000-000000000000", "name": "Fantome"}, headers=h1)
+            self.assertEqual(res_not_found.status_code, 404)
+
+            # 4. Doublon interdit (400)
+            res_dup = client.post("/beneficiaries", json={"account_id": acc2_id, "name": "Bob Bis"}, headers=h1)
+            self.assertEqual(res_dup.status_code, 400)
+
+            # 5. Nom invalide (400 ou 422)
+            res_empty_space = client.post("/beneficiaries", json={"account_id": acc2_id, "name": "   "}, headers=h1)
+            self.assertEqual(res_empty_space.status_code, 400)
+            res_empty_str = client.post("/beneficiaries", json={"account_id": acc2_id, "name": ""}, headers=h1)
+            self.assertEqual(res_empty_str.status_code, 422)
+
+            # 6. Non authentifié (401)
+            res_no_auth = client.post("/beneficiaries", json={"account_id": acc2_id, "name": "Inconnu"})
+            self.assertEqual(res_no_auth.status_code, 401)
+
 if __name__ == "__main__":
     unittest.main()

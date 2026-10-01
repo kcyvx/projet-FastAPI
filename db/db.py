@@ -3,6 +3,7 @@ from sqlmodel import SQLModel, create_engine, Session, select
 from account.account import Account
 from user.user import User
 from transaction.transaction import Transaction
+from beneficiary.beneficiary import Beneficiary
 
 sqlite_file_name = "database.db"
 sqlite_url = f"sqlite:///{sqlite_file_name}"

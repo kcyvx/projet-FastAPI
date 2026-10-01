@@ -2,6 +2,7 @@ from typing import Protocol, Optional, List
 from account.account import Account
 from user.user import User, UserCreate
 from transaction.transaction import Transaction
+from beneficiary.beneficiary import Beneficiary
 
 class AccountRepository(Protocol):
     def get_by_id(self, account_id: str) -> Optional[Account]:
@@ -60,6 +61,16 @@ class AccountRepository(Protocol):
         """Récupère toutes les transactions d'un compte (débit ou crédit), triées par date décroissante."""
         ...
 
+    def add_beneficiary(self, user_id: int, account_id: str, name: str) -> Beneficiary:
+        ...
+
+    def get_beneficiary_by_account(self, user_id: int, account_id: str) -> Optional[Beneficiary]:
+        ...
+
+    def get_beneficiaries(self, user_id: int) -> List[Beneficiary]:
+        ...
+    
+
 class UserRepository(Protocol):
     def get_by_email(self, email: str) -> Optional[User]:
         """Récupère un utilisateur par son adresse email."""
@@ -72,3 +83,5 @@ class UserRepository(Protocol):
     def create(self, user_in: UserCreate) -> User:
         """Crée et enregistre un nouvel utilisateur."""
         ...
+    
+    

@@ -3,6 +3,7 @@ from typing import Optional, List
 from account.account import Account
 from user.user import User, UserCreate, hash_password
 from transaction.transaction import Transaction, TransferStatus, debit, credit
+from beneficiary.beneficiary import Beneficiary
 
 class FakeAccountRepository:
     def __init__(self):
@@ -13,6 +14,7 @@ class FakeAccountRepository:
             id_bob: Account(id=id_bob, name="Bob", solde=100.0, user_id=2, is_main=True),
         }
         self.transactions: list[Transaction] = []
+        self.beneficiaries: list[Beneficiary] = []
 
     def get_by_id(self, account_id: str ) -> Optional[Account]:
         return self.accounts.get(account_id)
@@ -140,7 +142,28 @@ class FakeAccountRepository:
         except Exception:
             tx.statut = TransferStatus.REJECTED.value
             raise
+        
+    def add_beneficiary(self, user_id: int, account_id: str, name: str) -> Beneficiary:
+        new_id = len(self.beneficiaries) + 1
+        b = Beneficiary(
+            id=new_id,
+            user_id=user_id,
+            account_id=account_id,
+            name=name
+        )
+        self.beneficiaries.append(b)
+        return b
 
+    def get_beneficiary_by_account(self, user_id: int, account_id: str) -> Optional[Beneficiary]:
+        for b in self.beneficiaries:
+            if b.user_id == user_id and b.account_id == account_id:
+                return b
+        return None
+
+    def get_beneficiaries(self, user_id: int) -> List[Beneficiary]:
+        return [b for b in self.beneficiaries if b.user_id == user_id]
+
+        
 class FakeUserRepository:
     def __init__(self):
         self.users_by_email: dict[str, User] = {}

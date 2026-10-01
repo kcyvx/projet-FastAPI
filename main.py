@@ -16,6 +16,7 @@ from transaction.transaction import (
 from repositories.interfaces import AccountRepository, UserRepository
 from dependencies import get_account_repo, get_user_repo, get_current_user, is_use_sql
 from db.db import seed_initial_data
+from beneficiary.beneficiary import BeneficiaryCreate
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -328,4 +329,48 @@ def cloturer_compte(
         "is_closed": closed_account.is_closed,
         "transferred_amount": tx.montant if tx else 0.0,
         "main_account_new_solde": main_account.solde
+    }
+
+
+@app.post("/beneficiaries", status_code=201)
+def ajouter_beneficiaire(
+    payload: BeneficiaryCreate,
+    current_user: dict = Depends(get_current_user),
+    account_repo: AccountRepository = Depends(get_account_repo)
+):
+    clean_name = payload.name.strip()
+    if not clean_name:
+        raise HTTPException(
+            status_code=400,
+            detail="Le nom du bénéficiaire doit être renseigné."
+        )
+
+    target_account = account_repo.get_by_id(payload.account_id)
+    if not target_account:
+        raise HTTPException(
+            status_code=404,
+            detail="Compte bénéficiaire introuvable."
+        )
+
+    if target_account.user_id == current_user["id"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Le bénéficiaire ne peut pas être un de vos propres comptes."
+        )
+
+    existing = account_repo.get_beneficiary_by_account(current_user["id"], payload.account_id)
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail="Ce bénéficiaire a déjà été ajouté."
+        )
+
+    beneficiary = account_repo.add_beneficiary(
+        user_id=current_user["id"],
+        account_id=payload.account_id,
+        name=clean_name
+    )
+    return {
+        "message": "Bénéficiaire ajouté avec succès.",
+        "beneficiary": beneficiary
     }

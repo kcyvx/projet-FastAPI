@@ -3,6 +3,7 @@ from sqlmodel import Session, select, or_
 from account.account import Account
 from user.user import User, UserCreate, hash_password
 from transaction.transaction import Transaction, TransferStatus, debit, credit
+from beneficiary.beneficiary import Beneficiary
 
 class SqlAccountRepository:
     def __init__(self, session: Session):
@@ -185,6 +186,28 @@ class SqlAccountRepository:
             self.session.add(tx)
             self.session.commit()
             raise
+
+    def add_beneficiary(self, user_id: int, account_id: str, name: str) -> Beneficiary:
+        b = Beneficiary(user_id=user_id, account_id=account_id, name=name)
+        try:
+            self.session.add(b)
+            self.session.commit()
+            self.session.refresh(b)
+            return b
+        except Exception:
+            self.session.rollback()
+            raise
+
+    def get_beneficiary_by_account(self, user_id: int, account_id: str) -> Optional[Beneficiary]:
+        statement = select(Beneficiary).where(
+            Beneficiary.user_id == user_id,
+            Beneficiary.account_id == account_id
+        )
+        return self.session.exec(statement).first()
+
+    def get_beneficiaries(self, user_id: int) -> List[Beneficiary]:
+        statement = select(Beneficiary).where(Beneficiary.user_id == user_id)
+        return list(self.session.exec(statement).all())
 
 class SqlUserRepository:
     def __init__(self, session: Session):
