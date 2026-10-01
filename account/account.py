@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 from typing import Optional, Union
 from sqlmodel import SQLModel, Field
 from pydantic import BaseModel
@@ -12,6 +13,10 @@ class Account(SQLModel, table=True):
     user_id: int = Field(foreign_key="user.id", index=True)
     is_main: bool = Field(default=False)
     is_closed: bool = Field(default=False)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
 
 
 class AccountCreate(BaseModel):     
@@ -41,5 +46,6 @@ def AccountInfo(account: Account, user_or_token: Union[int, str, dict]) -> dict:
         "name": account.name,
         "solde": account.solde,
         "is_main": account.is_main,
-        "is_closed": account.is_closed
+        "is_closed": account.is_closed,
+        "created_at": account.created_at
     }

@@ -2,15 +2,25 @@ import os
 import unittest
 from fastapi.testclient import TestClient
 from main import app
-from repositories.fake_repo import FakeAccountRepository, FakeUserRepository
+from repositories.fake_repo import (
+    FakeAccountRepository,
+    FakeTransactionRepository,
+    FakeBeneficiaryRepository,
+    FakeUserRepository
+)
 import dependencies
 
 class TestFastAPIBankingAPI(unittest.TestCase):
     def setUp(self):
         # Réinitialise les repositories Fake pour garantir l'indépendance de chaque test
         dependencies._fake_account_repo = FakeAccountRepository()
+        dependencies._fake_transaction_repo = FakeTransactionRepository()
+        dependencies._fake_beneficiary_repo = FakeBeneficiaryRepository()
         dependencies._fake_user_repo = FakeUserRepository()
         os.environ["TRANSFER_DELAY_SECONDS"] = "0"
+        os.environ["USE_SQL"] = "false"
+        os.environ["TASK_SCHEDULER_INTERVAL_SECONDS"] = "10.0"
+        os.environ["CANCELLATION_TIMEOUT_SECONDS"] = "5.0"
 
     def _execute_full_suite(self, mode_name: str, use_sql: bool):
         os.environ["USE_SQL"] = "true" if use_sql else "false"
@@ -155,15 +165,30 @@ class TestFastAPIBankingAPI(unittest.TestCase):
             tx_payload_tiers = {"source_id": acc1_id, "destinataire_id": acc2_id, "montant": 50.0}
             res_tx = client.post("/transactions", json=tx_payload_tiers, headers=headers1)
             self.assertEqual(res_tx.status_code, 200)
-            self.assertEqual(res_tx.json().get("sender_new_solde"), 150.0)
-            self.assertEqual(res_tx.json().get("receiver_new_solde"), 50.0)
+            self.assertEqual(res_tx.json().get("status"), "pending")
+            self.assertIsNotNone(res_tx.json().get("transaction_id"))
+
+            # Application de la transaction via le TaskScheduler (apply_pending_transactions)
+            from scheduler import apply_pending_transactions
+            apply_pending_transactions(cancellation_timeout=0.0)
+
+            # Vérification des soldes après exécution du scheduler
+            info1 = client.get(f"/accounts/{acc1_id}", headers=headers1).json()
+            info2 = client.get(f"/accounts/{acc2_id}", headers=headers2).json()
+            self.assertEqual(info1.get("solde"), 150.0)
+            self.assertEqual(info2.get("solde"), 50.0)
 
             # 8.2 Virement réussi vers son propre autre compte (User 1 vers User 1 bis)
             tx_payload_propre = {"source_id": acc1_id, "destinataire_id": acc1_bis_id, "montant": 25.0}
             res_tx_propre = client.post("/transactions", json=tx_payload_propre, headers=headers1)
             self.assertEqual(res_tx_propre.status_code, 200)
-            self.assertEqual(res_tx_propre.json().get("sender_new_solde"), 125.0)
-            self.assertEqual(res_tx_propre.json().get("receiver_new_solde"), 25.0)
+            self.assertEqual(res_tx_propre.json().get("status"), "pending")
+
+            apply_pending_transactions(cancellation_timeout=0.0)
+            info1_after = client.get(f"/accounts/{acc1_id}", headers=headers1).json()
+            info1_bis = client.get(f"/accounts/{acc1_bis_id}", headers=headers1).json()
+            self.assertEqual(info1_after.get("solde"), 125.0)
+            self.assertEqual(info1_bis.get("solde"), 25.0)
 
             # 8.3 Virement sans authentification (401)
             res_tx_no_auth = client.post("/transactions", json=tx_payload_tiers)
@@ -199,12 +224,12 @@ class TestFastAPIBankingAPI(unittest.TestCase):
             self.assertIn(res_tx_zero.status_code, (400, 422))
 
     def test_transaction_floating_window_and_pending_dict(self):
-        """Vérifie le stockage de la transaction pending en DB et sa validation après le délai."""
+        """Vérifie le stockage immédiat en pending et l'application après 5 secondes par le TaskScheduler."""
         from transaction.transaction import TransferStatus
+        from scheduler import apply_pending_transactions
         import time
 
         os.environ["USE_SQL"] = "false"
-        os.environ["TRANSFER_DELAY_SECONDS"] = "0.2"
 
         with TestClient(app) as client:
             ts = int(time.time() * 1000)
@@ -217,23 +242,39 @@ class TestFastAPIBankingAPI(unittest.TestCase):
             acc2 = client.post("/accounts", json={"name": "Compte B"}, headers=headers).json()["account"]
             client.post(f"/accounts/{acc1['id']}/deposit", json={"montant": 100.0}, headers=headers)
 
+            # 1. Enregistrement immédiat avec statut pending
             res = client.post("/transactions", json={"source_id": acc1["id"], "destinataire_id": acc2["id"], "montant": 40.0}, headers=headers)
             self.assertEqual(res.status_code, 200)
-            self.assertEqual(res.json()["sender_new_solde"], 60.0)
-
+            self.assertEqual(res.json()["status"], "pending")
             tx_id = res.json()["transaction_id"]
-            tx_in_db = dependencies._fake_account_repo.get_transaction_by_id(tx_id)
+
+            tx_in_db = dependencies._fake_transaction_repo.get_by_id(tx_id)
             self.assertIsNotNone(tx_in_db)
+            self.assertEqual(tx_in_db.statut, TransferStatus.PENDING.value)
+
+            # 2. Avant expiration du délai (timeout=5.0s), le scheduler ne l'applique pas
+            applied = apply_pending_transactions(cancellation_timeout=5.0)
+            self.assertNotIn(tx_id, applied)
+            self.assertEqual(tx_in_db.statut, TransferStatus.PENDING.value)
+
+            # 3. Une fois le délai écoulé (timeout=0.0s pour le test), le scheduler l'applique
+            applied_now = apply_pending_transactions(cancellation_timeout=0.0)
+            self.assertIn(tx_id, applied_now)
             self.assertEqual(tx_in_db.statut, TransferStatus.APPROVED.value)
 
+            info1 = client.get(f"/accounts/{acc1['id']}", headers=headers).json()
+            info2 = client.get(f"/accounts/{acc2['id']}", headers=headers).json()
+            self.assertEqual(info1["solde"], 60.0)
+            self.assertEqual(info2["solde"], 40.0)
+
     def test_transaction_cancel_during_floating_window(self):
-        """Vérifie l'annulation d'une transaction pendant le moment de flottement avec persistance en base."""
-        import threading
-        import time
+        """Vérifie l'annulation d'une transaction pendant le délai de 5s et le refus après expiration."""
         from transaction.transaction import TransferStatus
+        from scheduler import apply_pending_transactions
+        from datetime import datetime, timezone, timedelta
+        import time
 
         os.environ["USE_SQL"] = "false"
-        os.environ["TRANSFER_DELAY_SECONDS"] = "1.0"
 
         with TestClient(app) as client:
             ts = int(time.time() * 1000)
@@ -246,39 +287,40 @@ class TestFastAPIBankingAPI(unittest.TestCase):
             acc2 = client.post("/accounts", json={"name": "Compte Dest"}, headers=headers).json()["account"]
             client.post(f"/accounts/{acc1['id']}/deposit", json={"montant": 100.0}, headers=headers)
 
-            def cancel_worker():
-                time.sleep(0.2)
-                res_pending = client.get("/transactions/pending", headers=headers)
-                pending_txs = res_pending.json()
-                if pending_txs:
-                    client.post(f"/transactions/{pending_txs[0]['id']}/cancel", headers=headers)
-
-            t = threading.Thread(target=cancel_worker)
-            t.start()
-
             res = client.post("/transactions", json={"source_id": acc1["id"], "destinataire_id": acc2["id"], "montant": 50.0}, headers=headers)
-            t.join()
+            self.assertEqual(res.status_code, 200)
+            tx_id = res.json()["transaction_id"]
 
-            self.assertEqual(res.status_code, 400)
-            self.assertIn("annulée", res.json()["detail"])
+            # Annulation dans le délai de 5s : succès
+            res_cancel = client.post(f"/transactions/{tx_id}/cancel", headers=headers)
+            self.assertEqual(res_cancel.status_code, 200)
+            self.assertEqual(res_cancel.json()["status"], "cancelled")
 
-            info = client.get(f"/accounts/{acc1['id']}", headers=headers)
-            self.assertEqual(info.json()["solde"], 100.0)
+            # Le scheduler n'applique pas une transaction annulée
+            apply_pending_transactions(cancellation_timeout=0.0)
+            info = client.get(f"/accounts/{acc1['id']}", headers=headers).json()
+            self.assertEqual(info["solde"], 100.0)
 
-            # Vérifie que la transaction n'est plus en attente dans la base
-            pending_in_db = dependencies._fake_account_repo.get_pending_transactions()
-            self.assertEqual(len(pending_in_db), 0)
+            # Test du rejet si le délai de 5s est dépassé :
+            res2 = client.post("/transactions", json={"source_id": acc1["id"], "destinataire_id": acc2["id"], "montant": 20.0}, headers=headers)
+            tx2_id = res2.json()["transaction_id"]
+            tx2 = dependencies._fake_transaction_repo.get_by_id(tx2_id)
+            # Simule une création datant de plus de 5s
+            tx2.created_at = datetime.now(timezone.utc) - timedelta(seconds=10)
+
+            res_cancel_late = client.post(f"/transactions/{tx2_id}/cancel", headers=headers)
+            self.assertEqual(res_cancel_late.status_code, 400)
+            self.assertIn("dépassé", res_cancel_late.json()["detail"].lower())
 
     def test_transaction_floating_window_sql_mode(self):
-        """Vérifie le stockage de la transaction pending directement en base SQLite et sa validation."""
-        from transaction.transaction import TransferStatus
+        """Vérifie le stockage de la transaction pending directement en base SQLite et sa validation par le scheduler."""
+        from transaction.transaction import TransferStatus, Transaction
         from sqlmodel import Session
         from db.db import engine
-        from transaction.transaction import Transaction
+        from scheduler import apply_pending_transactions
         import time
 
         os.environ["USE_SQL"] = "true"
-        os.environ["TRANSFER_DELAY_SECONDS"] = "0.2"
 
         with TestClient(app) as client:
             ts = int(time.time() * 1000)
@@ -293,25 +335,37 @@ class TestFastAPIBankingAPI(unittest.TestCase):
 
             res = client.post("/transactions", json={"source_id": acc1["id"], "destinataire_id": acc2["id"], "montant": 40.0}, headers=headers)
             self.assertEqual(res.status_code, 200)
-            self.assertEqual(res.json()["sender_new_solde"], 60.0)
-
+            self.assertEqual(res.json()["status"], "pending")
             tx_id = res.json()["transaction_id"]
+
             with Session(engine) as session:
                 session.expire_all()
                 tx_in_db = session.get(Transaction, tx_id)
                 self.assertIsNotNone(tx_in_db)
+                self.assertEqual(tx_in_db.statut, TransferStatus.PENDING.value)
+
+            # Application par le TaskScheduler
+            applied = apply_pending_transactions(cancellation_timeout=0.0)
+            self.assertIn(tx_id, applied)
+
+            with Session(engine) as session:
+                session.expire_all()
+                tx_in_db = session.get(Transaction, tx_id)
                 self.assertEqual(tx_in_db.statut, TransferStatus.APPROVED.value)
 
+            info1 = client.get(f"/accounts/{acc1['id']}", headers=headers).json()
+            self.assertEqual(info1["solde"], 60.0)
+
     def test_transaction_cancel_during_floating_window_sql_mode(self):
-        """Vérifie l'annulation d'une transaction pendant le moment de flottement en mode SQL SQLite."""
-        import threading
+        """Vérifie l'annulation d'une transaction pendant le délai en mode SQL SQLite et rejet après 5s."""
         import time
+        from datetime import datetime, timezone, timedelta
         from sqlmodel import Session
         from db.db import engine
         from transaction.transaction import Transaction, TransferStatus
+        from scheduler import apply_pending_transactions
 
         os.environ["USE_SQL"] = "true"
-        os.environ["TRANSFER_DELAY_SECONDS"] = "1.0"
 
         with TestClient(app) as client:
             ts = int(time.time() * 1000)
@@ -324,30 +378,35 @@ class TestFastAPIBankingAPI(unittest.TestCase):
             acc2 = client.post("/accounts", json={"name": "Compte SQL Dest"}, headers=headers).json()["account"]
             client.post(f"/accounts/{acc1['id']}/deposit", json={"montant": 100.0}, headers=headers)
 
-            def cancel_worker():
-                time.sleep(0.2)
-                res_pending = client.get("/transactions/pending", headers=headers)
-                pending_txs = res_pending.json()
-                if pending_txs:
-                    client.post(f"/transactions/{pending_txs[0]['id']}/cancel", headers=headers)
-
-            t = threading.Thread(target=cancel_worker)
-            t.start()
-
             res = client.post("/transactions", json={"source_id": acc1["id"], "destinataire_id": acc2["id"], "montant": 50.0}, headers=headers)
-            t.join()
+            self.assertEqual(res.status_code, 200)
+            tx_id = res.json()["transaction_id"]
 
-            self.assertEqual(res.status_code, 400)
-            self.assertIn("annulée", res.json()["detail"])
-
-            info = client.get(f"/accounts/{acc1['id']}", headers=headers)
-            self.assertEqual(info.json()["solde"], 100.0)
+            res_cancel = client.post(f"/transactions/{tx_id}/cancel", headers=headers)
+            self.assertEqual(res_cancel.status_code, 200)
 
             # Vérifie dans SQLite que la transaction est bien marquée CANCELLED
             with Session(engine) as session:
                 session.expire_all()
-                pending_txs = client.get("/transactions/pending", headers=headers).json()
-                self.assertNotIn(acc1["id"], [p.get("source_id") for p in pending_txs])
+                tx_in_db = session.get(Transaction, tx_id)
+                self.assertEqual(tx_in_db.statut, TransferStatus.CANCELLED.value)
+
+            apply_pending_transactions(cancellation_timeout=0.0)
+            info = client.get(f"/accounts/{acc1['id']}", headers=headers)
+            self.assertEqual(info.json()["solde"], 100.0)
+
+            # Test délai dépassé (> 5s)
+            res2 = client.post("/transactions", json={"source_id": acc1["id"], "destinataire_id": acc2["id"], "montant": 20.0}, headers=headers)
+            tx2_id = res2.json()["transaction_id"]
+            with Session(engine) as session:
+                tx2 = session.get(Transaction, tx2_id)
+                tx2.created_at = datetime.now(timezone.utc) - timedelta(seconds=10)
+                session.add(tx2)
+                session.commit()
+
+            res_late = client.post(f"/transactions/{tx2_id}/cancel", headers=headers)
+            self.assertEqual(res_late.status_code, 400)
+            self.assertIn("dépassé", res_late.json()["detail"].lower())
 
     def test_all_routes_fake_mode(self):
         """Teste toutes les routes en mode mémoire (Fake repositories)."""
@@ -577,6 +636,87 @@ class TestFastAPIBankingAPI(unittest.TestCase):
 
             res_no_auth = client.get("/beneficiaries")
             self.assertEqual(res_no_auth.status_code, 401)
+
+    def test_accounts_ordered_by_created_at_desc(self):
+        """Vérifie que les comptes retournés par GET /accounts sont triés par created_at décroissant (Fake et SQL)."""
+        import time
+
+        for use_sql in (False, True):
+            os.environ["USE_SQL"] = "true" if use_sql else "false"
+            dependencies._fake_account_repo = FakeAccountRepository()
+            dependencies._fake_transaction_repo = FakeTransactionRepository()
+            dependencies._fake_beneficiary_repo = FakeBeneficiaryRepository()
+            dependencies._fake_user_repo = FakeUserRepository()
+
+            with TestClient(app) as client:
+                ts = int(time.time() * 1000)
+                email = f"order_{use_sql}_{ts}@test.com"
+                client.post("/register", json={"email": email, "password": "Password123!"})
+                token = client.post("/login", json={"email": email, "password": "Password123!"}).json()["access_token"]
+                headers = {"Authorization": f"Bearer {token}"}
+
+                # Création de 2 comptes supplémentaires
+                time.sleep(0.01)
+                res_c1 = client.post("/accounts", json={"name": "Compte 1"}, headers=headers)
+                self.assertEqual(res_c1.status_code, 201)
+                c1_id = res_c1.json()["account"]["id"]
+
+                time.sleep(0.01)
+                res_c2 = client.post("/accounts", json={"name": "Compte 2"}, headers=headers)
+                self.assertEqual(res_c2.status_code, 201)
+                c2_id = res_c2.json()["account"]["id"]
+
+                # Récupération des comptes
+                res_list = client.get("/accounts", headers=headers)
+                self.assertEqual(res_list.status_code, 200)
+                accounts = res_list.json()
+
+                self.assertGreaterEqual(len(accounts), 3)
+                # Le plus récent (Compte 2) doit être en premier
+                self.assertEqual(accounts[0]["id"], c2_id)
+                self.assertEqual(accounts[1]["id"], c1_id)
+
+                # Vérification de la présence du champ created_at
+                for acc in accounts:
+                    self.assertIn("created_at", acc)
+
+                # Vérification que chaque date est >= à la suivante
+                for i in range(len(accounts) - 1):
+                    self.assertGreaterEqual(accounts[i]["created_at"], accounts[i + 1]["created_at"])
+
+    def test_story_10_task_scheduler_auto_apply(self):
+        """Vérifie l'exécution automatique en tâche de fond du TaskScheduler (cronjob) sans appel manuel."""
+        import time
+        from transaction.transaction import TransferStatus
+
+        os.environ["USE_SQL"] = "false"
+        os.environ["TASK_SCHEDULER_INTERVAL_SECONDS"] = "0.05"
+        os.environ["CANCELLATION_TIMEOUT_SECONDS"] = "0.05"
+
+        with TestClient(app) as client:
+            ts = int(time.time() * 1000)
+            email = f"scheduler_{ts}@test.com"
+            client.post("/register", json={"email": email, "password": "Password123!"})
+            token = client.post("/login", json={"email": email, "password": "Password123!"}).json()["access_token"]
+            headers = {"Authorization": f"Bearer {token}"}
+
+            acc1 = client.post("/accounts", json={"name": "Source Auto"}, headers=headers).json()["account"]
+            acc2 = client.post("/accounts", json={"name": "Dest Auto"}, headers=headers).json()["account"]
+            client.post(f"/accounts/{acc1['id']}/deposit", json={"montant": 100.0}, headers=headers)
+
+            res = client.post("/transactions", json={"source_id": acc1["id"], "destinataire_id": acc2["id"], "montant": 30.0}, headers=headers)
+            self.assertEqual(res.status_code, 200)
+            self.assertEqual(res.json()["status"], "pending")
+            tx_id = res.json()["transaction_id"]
+
+            # Laisser le temps à la tâche d'arrière-plan TaskScheduler de tourner
+            time.sleep(0.15)
+
+            tx_in_db = dependencies._fake_transaction_repo.get_by_id(tx_id)
+            self.assertEqual(tx_in_db.statut, TransferStatus.APPROVED.value)
+
+            info1 = client.get(f"/accounts/{acc1['id']}", headers=headers).json()
+            self.assertEqual(info1["solde"], 70.0)
 
 if __name__ == "__main__":
     unittest.main()

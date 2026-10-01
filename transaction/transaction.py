@@ -7,8 +7,10 @@ from sqlmodel import SQLModel, Field
 class TransferStatus(str, Enum):
     PENDING = "pending"
     APPROVED = "approved"
+    APPLIED = "applied"
     REJECTED = "rejected"
     CANCELLED = "cancelled"
+    CANCEL = "cancel"
 
 class Transaction(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
