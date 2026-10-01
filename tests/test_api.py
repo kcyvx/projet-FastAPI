@@ -538,5 +538,45 @@ class TestFastAPIBankingAPI(unittest.TestCase):
             res_no_auth = client.post("/beneficiaries", json={"account_id": acc2_id, "name": "Inconnu"})
             self.assertEqual(res_no_auth.status_code, 401)
 
+    def test_story_15_get_beneficiaries(self):
+        import time
+        os.environ["USE_SQL"] = "false"
+        with TestClient(app) as client:
+            ts = int(time.time() * 1000)
+            u1_email = f"u1_s15_{ts}@test.com"
+            client.post("/register", json={"email": u1_email, "password": "Password123!"})
+            t1 = client.post("/login", json={"email": u1_email, "password": "Password123!"}).json()["access_token"]
+            h1 = {"Authorization": f"Bearer {t1}"}
+
+            u2_email = f"u2_s15_{ts}@test.com"
+            client.post("/register", json={"email": u2_email, "password": "Password123!"})
+            t2 = client.post("/login", json={"email": u2_email, "password": "Password123!"}).json()["access_token"]
+            h2 = {"Authorization": f"Bearer {t2}"}
+            acc2_id = client.get("/accounts", headers=h2).json()[0]["id"]
+
+            res_empty = client.get("/beneficiaries", headers=h1)
+            self.assertEqual(res_empty.status_code, 200)
+            self.assertEqual(res_empty.json(), [])
+
+            client.post("/beneficiaries", json={"account_id": acc2_id, "name": "Bénéficiaire 1"}, headers=h1)
+
+            res_list = client.get("/beneficiaries", headers=h1)
+            self.assertEqual(res_list.status_code, 200)
+            beneficiaries = res_list.json()
+            self.assertEqual(len(beneficiaries), 1)
+
+            item = beneficiaries[0]
+            self.assertIn("id", item)
+            self.assertEqual(item["name"], "Bénéficiaire 1")
+            self.assertEqual(item["account_id"], acc2_id)
+            self.assertIn("created_at", item)
+
+            res_other_user = client.get("/beneficiaries", headers=h2)
+            self.assertEqual(res_other_user.status_code, 200)
+            self.assertEqual(res_other_user.json(), [])
+
+            res_no_auth = client.get("/beneficiaries")
+            self.assertEqual(res_no_auth.status_code, 401)
+
 if __name__ == "__main__":
     unittest.main()

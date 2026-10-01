@@ -20,8 +20,3 @@ def get_session():
 
 def seed_initial_data():
     create_db_and_tables()
-    with Session(engine) as session:
-        if not session.exec(select(Account)).first():
-            session.add(Account(id=str(uuid.uuid4()), name="Alice", solde=100.0, user_id=1, is_main=True))
-            session.add(Account(id=str(uuid.uuid4()), name="Bob", solde=100.0, user_id=2, is_main=True))
-            session.commit()

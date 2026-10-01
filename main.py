@@ -374,3 +374,12 @@ def ajouter_beneficiaire(
         "message": "Bénéficiaire ajouté avec succès.",
         "beneficiary": beneficiary
     }
+
+@app.get("/beneficiaries")
+def liste_beneficiaires(
+    current_user: dict = Depends(get_current_user),
+    account_repo: AccountRepository = Depends(get_account_repo)
+):
+    return account_repo.get_beneficiaries(current_user["id"])
+
+    
