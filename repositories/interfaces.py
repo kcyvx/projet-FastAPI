@@ -62,12 +62,15 @@ class AccountRepository(Protocol):
         ...
 
     def add_beneficiary(self, user_id: int, account_id: str, name: str) -> Beneficiary:
+        """Ajoute un compte bénéficiaire pour un utilisateur."""
         ...
 
     def get_beneficiary_by_account(self, user_id: int, account_id: str) -> Optional[Beneficiary]:
+        """Vérifie si un compte cible est déjà enregistré comme bénéficiaire pour l'utilisateur."""
         ...
 
     def get_beneficiaries(self, user_id: int) -> List[Beneficiary]:
+        """Récupère tous les bénéficiaires enregistrés par un utilisateur."""
         ...
     
 
